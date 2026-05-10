@@ -12,16 +12,29 @@ This guide provides step-by-step instructions for configuring xct-chat to use au
 
 ## Registration at auth.xcity.one
 
-Before configuring environment variables, you must register xct-chat as an OAuth client at auth.xcity.one:
+Before configuring environment variables, you must register xct-chat as an OAuth client at auth.xcity.one using the GoTrue admin API.
 
-1. Log in to auth.xcity.one admin panel
-2. Create a new OAuth/OIDC client with the following settings:
-   - **Client Name**: Xcity Chat
-   - **Redirect URI**: `https://chat.xcity.one/oauth/openid/callback`
-   - **Post Logout Redirect URI**: `https://chat.xcity.one/login`
-   - **Scopes**: `openid profile email`
-   - **Grant Type**: Authorization Code
-3. Save the generated `CLIENT_ID` and `CLIENT_SECRET`
+### Via GoTrue Admin API
+
+Requires the `GOTRUE_ADMIN_TOKEN` (a service-role JWT signed with `GOTRUE_JWT_SECRET`). See `xcity-home/docs/dashboard-setup.md` for how to mint one.
+
+```bash
+curl -X POST https://auth.xcity.one/admin/oauth/clients \
+  -H "Authorization: Bearer $GOTRUE_ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Xcity Chat",
+    "redirect_uris": ["https://chat.xcity.one/oauth/openid/callback"]
+  }'
+```
+
+The response contains `client_id` and `client_secret`. Save them for the environment configuration below.
+
+Then update `GOTRUE_URI_ALLOW_LIST` on the auth.xcity.one Railway service to include:
+
+```
+https://chat.xcity.one/oauth/openid/callback,https://chat.xcity.one/login
+```
 
 ## Environment Variables Configuration
 
@@ -71,11 +84,14 @@ OPENID_IMAGE_URL=/logo.png
 
 ### Logout Synchronization
 
-Enable logout synchronization with auth.xcity.one:
+Configure logout behavior with auth.xcity.one:
 
 ```bash
-# Use OIDC end session endpoint for logout
-OPENID_USE_END_SESSION_ENDPOINT=true
+# GoTrue does not currently expose an OIDC end_session_endpoint in its
+# discovery document. Set to false until it does. xct-chat will perform
+# a local logout only; the GoTrue session is still revoked server-side
+# via POST /logout when the refresh token expires.
+OPENID_USE_END_SESSION_ENDPOINT=false
 
 # Redirect URL after logout
 OPENID_POST_LOGOUT_REDIRECT_URI=https://chat.xcity.one/login
@@ -122,8 +138,8 @@ OPENID_AUTO_REDIRECT=true
 OPENID_BUTTON_LABEL="Login with Xcity"
 OPENID_IMAGE_URL=/logo.png
 
-# Logout Sync
-OPENID_USE_END_SESSION_ENDPOINT=true
+# Logout Sync (disabled until GoTrue adds end_session_endpoint)
+OPENID_USE_END_SESSION_ENDPOINT=false
 OPENID_POST_LOGOUT_REDIRECT_URI=https://chat.xcity.one/login
 
 # Domain

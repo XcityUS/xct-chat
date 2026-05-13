@@ -1,0 +1,146 @@
+version: '3.8'
+
+# XCity AI Hub — Chat (LibreChat fork) Production Stack
+# Required env vars (set in .env or CI secrets):
+#   MEILI_MASTER_KEY, OPENAI_API_KEY, MONGO_URI (or use the mongodb service below)
+#
+# Usage:
+#   docker compose -f docker-compose.xcity.yml --env-file .env up -d
+
+services:
+  api:
+    image: ${DOCKER_IMAGE:-xcityus/xct-chat}:${IMAGE_TAG:-latest}
+    container_name: xct-chat-api
+    ports:
+      - "${PORT:-3080}:3080"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      meilisearch:
+        condition: service_healthy
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file:
+      - .env
+    environment:
+      - HOST=0.0.0.0
+      - NODE_ENV=production
+      - MONGO_URI=mongodb://mongodb:27017/LibreChat
+      - MEILI_HOST=http://meilisearch:7700
+      - RAG_PORT=${RAG_PORT:-8000}
+      - RAG_API_URL=http://rag_api:${RAG_PORT:-8000}
+    volumes:
+      - ./librechat.yaml:/app/librechat.yaml:ro
+      - chat_images:/app/client/public/images
+      - chat_uploads:/app/uploads
+      - chat_logs:/app/api/logs
+    networks:
+      - xct-chat-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3080/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  mongodb:
+    image: mongo:8.0
+    container_name: xct-chat-mongodb
+    restart: unless-stopped
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - xct-chat-network
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.35.1
+    container_name: xct-chat-meilisearch
+    restart: unless-stopped
+    environment:
+      - MEILI_NO_ANALYTICS=true
+      - MEILI_MASTER_KEY=${MEILI_MASTER_KEY}
+    volumes:
+      - meili_data:/meili_data
+    networks:
+      - xct-chat-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:7700/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  rag_api:
+    image: registry.librechat.ai/danny-avila/librechat-rag-api-dev:latest
+    container_name: xct-chat-rag
+    restart: unless-stopped
+    depends_on:
+      vectordb:
+        condition: service_healthy
+    environment:
+      - DB_HOST=vectordb
+      - DB_PORT=5432
+      - POSTGRES_DB=${VECTOR_DB_NAME:-ragdb}
+      - POSTGRES_USER=${VECTOR_DB_USER:-raguser}
+      - POSTGRES_PASSWORD=${VECTOR_DB_PASSWORD}
+    env_file:
+      - .env
+    networks:
+      - xct-chat-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  vectordb:
+    image: pgvector/pgvector:0.8.0-pg16
+    container_name: xct-chat-vectordb
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${VECTOR_DB_NAME:-ragdb}
+      POSTGRES_USER: ${VECTOR_DB_USER:-raguser}
+      POSTGRES_PASSWORD: ${VECTOR_DB_PASSWORD}
+    volumes:
+      - vector_data:/var/lib/postgresql/data
+    networks:
+      - xct-chat-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${VECTOR_DB_USER:-raguser}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  chat_images:
+  chat_uploads:
+  chat_logs:
+  mongo_data:
+  meili_data:
+  vector_data:
+
+networks:
+  xct-chat-network:
+    driver: bridge
+    name: xct-chat-network

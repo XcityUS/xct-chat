@@ -25,6 +25,7 @@ jest.mock('@librechat/api', () => {
     sanitizeArtifactPath: mockSanitizeArtifactPath,
     flattenArtifactPath: mockFlattenArtifactPath,
     createAxiosInstance: jest.fn(() => mockAxios),
+    getCodeApiAuthHeaders: jest.fn(async () => ({})),
     classifyCodeArtifact: jest.fn(() => 'other'),
     extractCodeArtifactText: jest.fn(async () => null),
     /* `processCodeOutput` calls this to derive the trust flag persisted
@@ -40,6 +41,15 @@ jest.mock('@librechat/api', () => {
      * inline (non-finalize) path so existing assertions on a single
      * createFile call hold. */
     hasOfficeHtmlPath: jest.fn(() => false),
+    /* Identity-helper stub mirroring `packages/api/src/files/code/identity.ts`.
+     * `processCodeOutput` calls this for every output download URL;
+     * traversal cases don't care about the query shape, just that it
+     * returns something concatable. */
+    buildCodeEnvDownloadQuery: jest.fn(({ kind, id, version }) => {
+      const params = new URLSearchParams({ kind, id });
+      if (version != null) params.set('version', String(version));
+      return `?${params.toString()}`;
+    }),
     codeServerHttpAgent: new http.Agent({ keepAlive: false }),
     codeServerHttpsAgent: new https.Agent({ keepAlive: false }),
   };

@@ -38,13 +38,14 @@ interface SubagentCallProps {
    *  runs recorded before the persistence path landed will not have this
    *  field; those fall back to the atom (or the raw `output` string). */
   persistedContent?: TMessageContentParts[];
+  hideAttachments?: boolean;
 }
 
 const TICKER_MAX_LINES = 3;
-/** Trailing-edge throttle window for the live preview. Tuned down from
- *  the original 1.2s so the ticker feels snappy when the container is
- *  already full and frames are scrolling. */
-const TICKER_THROTTLE_MS = 800;
+/** Trailing-edge refresh window for the live preview once the ticker has
+ *  enough text to fill the row. Keeps long streaming lines from repainting
+ *  every token while still letting the collapsed subagent UI feel responsive. */
+export const SUBAGENT_TICKER_THROTTLE_MS = 400;
 /** Below this live-buffer length we skip throttling entirely. Without
  *  this the user would see "Reasoning: I" for ~1s while the model
  *  streams the rest of the sentence — the pass-through lets early
@@ -161,6 +162,7 @@ export default function SubagentCall({
   output,
   attachments,
   persistedContent,
+  hideAttachments = false,
 }: SubagentCallProps) {
   const localize = useLocalize();
   const progress = useRecoilValue(subagentProgressByToolCallId(toolCallId));
@@ -241,7 +243,7 @@ export default function SubagentCall({
 
   const displayedTickerLines = useThrottledValue(
     tickerLines,
-    TICKER_THROTTLE_MS,
+    SUBAGENT_TICKER_THROTTLE_MS,
     shouldThrottleTicker,
   );
 
@@ -250,14 +252,13 @@ export default function SubagentCall({
   /** Base verb-only label ("Running agent" / "Ran agent"). The agent name
    *  is rendered separately as a muted sub-label so "agent" stays a
    *  constant visual anchor regardless of name length. */
-  let headerText = localize('com_ui_subagent_complete');
-  if (hasError) {
-    headerText = localize('com_ui_subagent_errored');
-  } else if (cancelled) {
-    headerText = localize('com_ui_subagent_cancelled');
-  } else if (running) {
-    headerText = localize('com_ui_subagent_running');
-  }
+  const getHeaderText = () => {
+    if (hasError) return localize('com_ui_subagent_errored');
+    if (cancelled) return localize('com_ui_subagent_cancelled');
+    if (running) return localize('com_ui_subagent_running');
+    return localize('com_ui_subagent_complete');
+  };
+  const headerText = getHeaderText();
   /** Muted sub-label shown to the right of the base label: the
    *  configured agent name for named subagents. Self-spawns omit it
    *  (redundant — the header already says "agent") as do cases where
@@ -383,60 +384,66 @@ export default function SubagentCall({
     setIsAtBottom(true);
   }, []);
 
-  const emptyDialogText = running
-    ? localize('com_ui_subagent_no_result_yet')
-    : localize('com_ui_subagent_empty_result');
-
-  let dialogContent: JSX.Element;
-  if (contentParts.length > 0) {
-    dialogContent = (
-      <MessageContext.Provider value={dialogMessageContext}>
-        {groupedParts.map((group) => {
-          if (group.type === 'single') {
-            const { part, idx } = group.part;
-            /** Per-type dispatch handles wrapping: TEXT goes through
-             *  `Container`, THINK/TOOL_CALL render directly so their own
-             *  wrappers set the width and spacing. */
-            return renderDialogPart(part, idx, idx === lastPartIndex);
-          }
-          /** Consecutive tool_calls (2+) collapse into a `Used N tools`
-           *  group — same behavior as the main message view. */
-          return (
-            <ToolCallGroup
-              key={`${toolCallId}-group-${group.parts[0].idx}`}
-              parts={group.parts}
-              isSubmitting={running}
-              isLast={group.parts.some((p) => p.idx === lastPartIndex)}
-              renderPart={renderDialogPart}
-              lastContentIdx={lastPartIndex}
-            />
-          );
-        })}
-      </MessageContext.Provider>
+  const renderDialogBody = () => {
+    if (contentParts.length > 0) {
+      return (
+        <MessageContext.Provider value={dialogMessageContext}>
+          {groupedParts.map((group) => {
+            if (group.type === 'single') {
+              const { part, idx } = group.part;
+              /** Per-type dispatch handles wrapping: TEXT goes
+               *  through `Container`, THINK/TOOL_CALL render
+               *  directly so their own wrappers set the width
+               *  and spacing. */
+              return renderDialogPart(part, idx, idx === lastPartIndex);
+            }
+            /** Consecutive tool_calls (2+) collapse into a
+             *  `Used N tools` group — same behavior as the main
+             *  message view. */
+            return (
+              <ToolCallGroup
+                key={`${toolCallId}-group-${group.parts[0].idx}`}
+                parts={group.parts}
+                isSubmitting={running}
+                isLast={group.parts.some((p) => p.idx === lastPartIndex)}
+                renderPart={renderDialogPart}
+                lastContentIdx={lastPartIndex}
+              />
+            );
+          })}
+        </MessageContext.Provider>
+      );
+    }
+    if (output) {
+      /** Fallback: no aggregated content parts but the backend
+       *  wrote a final tool_call output. Happens for older
+       *  subagent runs recorded before the event forwarder
+       *  existed. Route through the same leaf renderer so
+       *  markdown renders properly. */
+      return (
+        <MessageContext.Provider value={dialogMessageContext}>
+          <SubagentDialogPart
+            part={
+              {
+                type: ContentTypes.TEXT,
+                text: output,
+              } as unknown as TMessageContentParts
+            }
+            isSubmitting={false}
+            showCursor={false}
+            isLast
+          />
+        </MessageContext.Provider>
+      );
+    }
+    return (
+      <div className="text-sm italic text-text-secondary">
+        {running
+          ? localize('com_ui_subagent_no_result_yet')
+          : localize('com_ui_subagent_empty_result')}
+      </div>
     );
-  } else if (output) {
-    /** Fallback: no aggregated content parts but the backend wrote a final
-     *  tool_call output. Happens for older subagent runs recorded before the
-     *  event forwarder existed. Route through the same leaf renderer so
-     *  markdown renders properly. */
-    dialogContent = (
-      <MessageContext.Provider value={dialogMessageContext}>
-        <SubagentDialogPart
-          part={
-            {
-              type: ContentTypes.TEXT,
-              text: output,
-            } as unknown as TMessageContentParts
-          }
-          isSubmitting={false}
-          showCursor={false}
-          isLast
-        />
-      </MessageContext.Provider>
-    );
-  } else {
-    dialogContent = <div className="text-sm italic text-text-secondary">{emptyDialogText}</div>;
-  }
+  };
 
   return (
     <>
@@ -554,14 +561,16 @@ export default function SubagentCall({
                     onToggle={() => setPromptExpanded((expanded) => !expanded)}
                   />
                 ) : null}
-                {dialogContent}
+                {renderDialogBody()}
               </div>
             </div>
           </div>
         </OGDialogContent>
       </OGDialog>
 
-      {attachments && attachments.length > 0 && <AttachmentGroup attachments={attachments} />}
+      {!hideAttachments && attachments && attachments.length > 0 && (
+        <AttachmentGroup attachments={attachments} />
+      )}
     </>
   );
 }

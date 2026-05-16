@@ -1024,6 +1024,7 @@ export type TConversation = z.infer<typeof tConversationSchema> & {
 export const tSharedLinkSchema = z.object({
   conversationId: z.string(),
   shareId: z.string(),
+  targetMessageId: z.string().optional(),
   messages: z.array(z.string()),
   isPublic: z.boolean(),
   title: z.string(),
@@ -1247,6 +1248,11 @@ export const openAIBaseSchema = tConversationSchema.pick({
 });
 
 export const openAISchema = openAIBaseSchema
+  .transform((obj: Partial<TConversation>) => removeNullishValues(obj, true))
+  .catch(() => ({}));
+
+export const openRouterSchema = openAIBaseSchema
+  .merge(tConversationSchema.pick({ promptCache: true }))
   .transform((obj: Partial<TConversation>) => removeNullishValues(obj, true))
   .catch(() => ({}));
 

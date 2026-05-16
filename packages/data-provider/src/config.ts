@@ -215,6 +215,7 @@ export const cloudfrontConfigSchema = z
       .optional(),
     storageRegion: z.string().min(1).optional(),
     includeRegionInPath: z.boolean().default(false),
+    requireSignedAccess: z.boolean().default(false),
   })
   .refine((data) => !data.invalidateOnDelete || !!data.distributionId, {
     message: 'distributionId is required when invalidateOnDelete is true',
@@ -224,6 +225,11 @@ export const cloudfrontConfigSchema = z
     message:
       'cookieDomain is required when imageSigning is "cookies" (e.g., ".example.com" for API at api.example.com and CDN at cdn.example.com)',
     path: ['cookieDomain'],
+  })
+  .refine((data) => !data.requireSignedAccess || data.imageSigning === 'cookies', {
+    message:
+      'cloudfront.requireSignedAccess=true requires cloudfront.imageSigning="cookies" (signed URL mode is not yet implemented)',
+    path: ['requireSignedAccess'],
   })
   .optional();
 
@@ -493,7 +499,7 @@ const remoteApiOidcSchema = z
   .object({
     enabled: z.boolean().default(false),
     issuer: remoteApiOidcUrlSchema.optional(),
-    audience: z.string().optional(),
+    audience: z.string().min(1).optional(),
     jwksUri: remoteApiOidcUrlSchema.optional(),
     scope: remoteApiOidcScopeSchema.optional(),
   })
@@ -503,6 +509,13 @@ const remoteApiOidcSchema = z
         code: z.ZodIssueCode.custom,
         path: ['issuer'],
         message: 'issuer is required when OIDC auth is enabled',
+      });
+    }
+    if (oidc.enabled === true && !oidc.audience) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['audience'],
+        message: 'audience is required when OIDC auth is enabled',
       });
     }
   });
@@ -1089,6 +1102,12 @@ export type TStartupConfig = {
     searchProvider?: SearchProviders;
     scraperProvider?: ScraperProviders;
     rerankerType?: RerankerTypes;
+  };
+  cloudFront?: {
+    cookieRefresh?: {
+      endpoint: string;
+      domain: string;
+    };
   };
   mcpServers?: Record<
     string,
@@ -2113,9 +2132,9 @@ export enum TTSProviders {
 /** Enum for app-wide constants */
 export enum Constants {
   /** Key for the app's version. */
-  VERSION = 'v0.8.5',
+  VERSION = 'v0.8.6-rc1',
   /** Key for the Custom Config's version (librechat.yaml). */
-  CONFIG_VERSION = '1.3.10',
+  CONFIG_VERSION = '1.3.11',
   /** Standard value for the first message's `parentMessageId` value, to indicate no parent exists. */
   NO_PARENT = '00000000-0000-0000-0000-000000000000',
   /** Standard value to use whatever the submission prelim. `responseMessageId` is */
@@ -2163,12 +2182,23 @@ export enum Constants {
   EPHEMERAL_AGENT_ID = 'ephemeral',
   /** Programmatic Tool Calling tool name */
   PROGRAMMATIC_TOOL_CALLING = 'run_tools_with_code',
+  /** Bash Programmatic Tool Calling tool name */
+  BASH_PROGRAMMATIC_TOOL_CALLING = 'run_tools_with_bash',
   /** Subagent spawn tool name (must match `@librechat/agents` `Constants.SUBAGENT`). */
   SUBAGENT = 'subagent',
 }
 
 /** Maximum number of explicit subagents per parent agent. UI + Zod schema share this. */
 export const MAX_SUBAGENTS = 10;
+
+/** Maximum explicit subagent hops allowed from any root agent at runtime. */
+export const MAX_SUBAGENT_DEPTH = 5;
+
+/** Maximum unique explicit subagent targets that may be loaded at runtime. */
+export const MAX_SUBAGENT_GRAPH_NODES = 50;
+
+/** Maximum expanded SubagentConfig entries embedded into one run request. */
+export const MAX_SUBAGENT_RUN_CONFIGS = 100;
 
 export enum LocalStorageKeys {
   /** Key for the admin defined App Title */

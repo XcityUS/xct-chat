@@ -223,15 +223,6 @@ const AdminSettingsDialog: React.FC<AdminSettingsDialogProps> = ({
                       permission === Permissions.USE && (
                         <div className="mb-2 max-w-full whitespace-normal break-words text-sm text-red-600">
                           <span>{localize('com_ui_admin_access_warning')}</span>
-                          {'\n'}
-                          <a
-                            href="https://www.librechat.ai/docs/configuration/librechat_yaml/object_structure/interface"
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-blue-500 underline"
-                          >
-                            {localize('com_ui_more_info')}
-                          </a>
                         </div>
                       )}
                   </div>

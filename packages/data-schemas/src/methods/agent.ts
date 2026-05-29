@@ -282,6 +282,50 @@ export function createAgentMethods(mongoose: typeof import('mongoose'), deps: Ag
     return await Agent.find(searchParameter).lean<IAgent[]>();
   }
 
+  async function hasAgentWithMCPServerName({
+    agentIds,
+    serverName,
+  }: {
+    agentIds: Types.ObjectId[];
+    serverName: string;
+  }): Promise<boolean> {
+    if (agentIds.length === 0) {
+      return false;
+    }
+
+    const Agent = mongoose.models.Agent as Model<IAgent>;
+    const agent = await Agent.exists({
+      _id: { $in: agentIds },
+      mcpServerNames: serverName,
+    });
+
+    return agent !== null;
+  }
+
+  async function getMCPServerNamesByAgentIds(agentIds: Types.ObjectId[]): Promise<string[]> {
+    if (agentIds.length === 0) {
+      return [];
+    }
+
+    const Agent = mongoose.models.Agent as Model<IAgent>;
+    const agents = await Agent.find(
+      {
+        _id: { $in: agentIds },
+        mcpServerNames: { $exists: true, $not: { $size: 0 } },
+      },
+      { mcpServerNames: 1 },
+    ).lean<Array<Pick<IAgent, 'mcpServerNames'>>>();
+
+    const serverNames = new Set<string>();
+    for (const agent of agents) {
+      for (const serverName of agent.mcpServerNames ?? []) {
+        serverNames.add(serverName);
+      }
+    }
+
+    return Array.from(serverNames);
+  }
+
   /**
    * Update an agent with new data without overwriting existing properties,
    * or create a new agent if it doesn't exist.
@@ -641,12 +685,13 @@ export function createAgentMethods(mongoose: typeof import('mongoose'), deps: Ag
   }
 
   /**
-   * Get agents by accessible IDs with optional cursor-based pagination.
+   * Get agents by accessible IDs with cursor pagination. Defaults to a 100-page
+   * limit (max 1000); pass `limit: null` to opt out entirely.
    */
   async function getListAgentsByAccess({
     accessibleIds = [],
     otherParams = {},
-    limit = null,
+    limit = 100,
     after = null,
     includeSkillConfig = false,
   }: {
@@ -666,7 +711,7 @@ export function createAgentMethods(mongoose: typeof import('mongoose'), deps: Ag
     const Agent = mongoose.models.Agent as Model<IAgent>;
     const isPaginated = limit !== null && limit !== undefined;
     const normalizedLimit = isPaginated
-      ? Math.min(Math.max(1, parseInt(String(limit)) || 20), 100)
+      ? Math.min(Math.max(1, parseInt(String(limit)) || 20), 1000)
       : null;
 
     const baseQuery: Record<string, unknown> = {
@@ -823,6 +868,8 @@ export function createAgentMethods(mongoose: typeof import('mongoose'), deps: Ag
     getAgent,
     getAgents,
     createAgent,
+    hasAgentWithMCPServerName,
+    getMCPServerNamesByAgentIds,
     updateAgent,
     deleteAgent,
     deleteUserAgents,

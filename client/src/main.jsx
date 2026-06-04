@@ -1,5 +1,4 @@
-import './lib/rum/early';
-import 'regenerator-runtime/runtime';
+import './polyfills/regeneratorRuntime';
 import { createRoot } from 'react-dom/client';
 import './locales/i18n';
 import App from './App';

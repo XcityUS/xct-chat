@@ -23,6 +23,7 @@ const {
   getMissingCustomUserVars,
   buildWebSearchDynamicContext,
   getCodeApiAuthHeaders,
+  isFileAuthoringToolDefinition,
 } = require('@librechat/api');
 const {
   Time,
@@ -63,7 +64,7 @@ const { primeFiles: primeCodeFiles } = require('~/server/services/Files/Code/pro
 const { manifestToolMap, toolkits } = require('~/app/clients/tools/manifest');
 const { createOnSearchResults } = require('~/server/services/Tools/search');
 const { reinitMCPServer } = require('~/server/services/Tools/mcp');
-const { resolveConfigServers } = require('~/server/services/MCP');
+const { createMCPPermissionContext, resolveConfigServers } = require('~/server/services/MCP');
 const { recordUsage } = require('~/server/services/Threads');
 const { loadTools } = require('~/app/clients/tools/util');
 const { redactMessage } = require('~/config/parsers');
@@ -551,6 +552,9 @@ async function loadToolDefinitionsWrapper({ req, res, agent, streamId = null, to
   const codeExecutionEnabled =
     agent.tools?.includes(Tools.execute_code) === true &&
     enabledCapabilities.has(AgentCapabilities.execute_code);
+  const hasMCPTools = agent.tools?.some((tool) => tool?.includes(Constants.mcp_delimiter));
+  const mcpPermissionContext = createMCPPermissionContext(req);
+  const canUseMCP = hasMCPTools ? await mcpPermissionContext.canUseServers(req.user) : true;
 
   const filteredTools = agent.tools?.filter((tool) => {
     if (tool === Tools.file_search) {
@@ -565,6 +569,9 @@ async function loadToolDefinitionsWrapper({ req, res, agent, streamId = null, to
     if (isActionTool(tool)) {
       return actionsEnabled;
     }
+    if (tool?.includes(Constants.mcp_delimiter)) {
+      return areToolsEnabled && canUseMCP;
+    }
     if (!areToolsEnabled) {
       return false;
     }
@@ -577,9 +584,9 @@ async function loadToolDefinitionsWrapper({ req, res, agent, streamId = null, to
 
   /** @type {Record<string, Record<string, string>>} */
   let userMCPAuthMap;
-  if (agent.tools?.some((t) => t.includes(Constants.mcp_delimiter))) {
+  if (filteredTools?.some((t) => t.includes(Constants.mcp_delimiter))) {
     userMCPAuthMap = await getUserMCPAuthMap({
-      tools: agent.tools,
+      tools: filteredTools,
       userId: req.user.id,
       findPluginAuthsByKeys,
     });
@@ -983,6 +990,9 @@ async function loadAgentTools({
   };
   const areToolsEnabled = checkCapability(AgentCapabilities.tools);
   const actionsEnabled = checkCapability(AgentCapabilities.actions);
+  const hasMCPTools = agent.tools?.some((tool) => tool?.includes(Constants.mcp_delimiter));
+  const mcpPermissionContext = createMCPPermissionContext(req);
+  const canUseMCP = hasMCPTools ? await mcpPermissionContext.canUseServers(req.user) : true;
 
   let includesWebSearch = false;
   const _agentTools = agent.tools?.filter((tool) => {
@@ -995,6 +1005,8 @@ async function loadAgentTools({
       return includesWebSearch;
     } else if (isActionTool(tool)) {
       return actionsEnabled;
+    } else if (tool?.includes(Constants.mcp_delimiter)) {
+      return areToolsEnabled && canUseMCP;
     } else if (!areToolsEnabled) {
       return false;
     }
@@ -1012,9 +1024,9 @@ async function loadAgentTools({
 
   /** @type {Record<string, Record<string, string>>} */
   let userMCPAuthMap;
-  if (agent.tools?.some((t) => t.includes(Constants.mcp_delimiter))) {
+  if (_agentTools?.some((t) => t.includes(Constants.mcp_delimiter))) {
     userMCPAuthMap = await getUserMCPAuthMap({
-      tools: agent.tools,
+      tools: _agentTools,
       userId: req.user.id,
       findPluginAuthsByKeys,
     });
@@ -1035,6 +1047,7 @@ async function loadAgentTools({
       processFileURL,
       uploadImageBuffer,
       returnMetadata: true,
+      mcpPermissionContext,
       [Tools.web_search]: webSearchCallbacks,
     },
     webSearch: appConfig.webSearch,
@@ -1368,6 +1381,13 @@ async function loadToolsForExecution({
     }
   }
 
+  const fileAuthoringToolNames = new Set(
+    toolRegistry
+      ? Array.from(toolRegistry.values())
+          .filter((definition) => isFileAuthoringToolDefinition(definition))
+          .map((definition) => definition.name)
+      : [],
+  );
   const specialToolNames = new Set([
     AgentConstants.TOOL_SEARCH,
     AgentConstants.PROGRAMMATIC_TOOL_CALLING,
@@ -1375,6 +1395,7 @@ async function loadToolsForExecution({
     AgentConstants.BASH_TOOL,
     AgentConstants.SKILL_TOOL,
     AgentConstants.READ_FILE,
+    ...fileAuthoringToolNames,
   ]);
 
   let ptcOrchestratedToolNames = [];

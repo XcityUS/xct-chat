@@ -72,7 +72,8 @@ bower_components/
 .flooignore
 
 #config file
-librechat.yaml
+# librechat.yaml is tracked: it is the Railway deploy config baked into the image
+# (no volume mount on Railway). Contains only ${ENV} placeholders, no secrets.
 librechat.yml
 
 # Environment

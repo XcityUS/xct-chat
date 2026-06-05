@@ -10,6 +10,9 @@
 data-node
 meili_data*
 librechat*
+# Keep the committed deploy config in the build context so `COPY . .` bakes it
+# into the image (Railway has no volume mount). Only ${ENV} placeholders inside.
+!librechat.yaml
 Dockerfile*
 docs
 

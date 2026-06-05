@@ -1,0 +1,99 @@
+version: 1.3.12
+
+# xct-chat (LibreChat) — XCity AI / LiteLLM integration
+# Proxy: https://tokenhub.xcity.one (LiteLLM gateway)
+# Set LITELLM_API_KEY in the environment to the restricted xct-chat virtual key.
+# LibreChat substitutes ${LITELLM_API_KEY} at load. This file is gitignored —
+# it must be present in each deployment (e.g. mounted/created on Railway).
+#
+# Content-creation capabilities (single gateway = LiteLLM):
+#   - Chat   : custom endpoint below (fetch:true, all LiteLLM models)        [done]
+#   - Image  : built-in "OpenAI Image Tools" agent tool, configured by the
+#              IMAGE_GEN_OAI_* env vars (see railway.env.template) which point
+#              at https://tokenhub.xcity.one/v1. Enabled via the `tools`
+#              agent capability below — nothing to add in this file.          [done]
+#   - Video/ : no native LibreChat tool; exposed as an Agent Action (OpenAPI)
+#     Audio    against the deployed fal gateway (/generate/video,
+#              /generate/audio) or LiteLLM /videos. Allow its domain under
+#              `actions.allowedDomains` once the gateway URL is known.        [pending: needs gateway deploy]
+
+endpoints:
+  # ---- Chat (all LiteLLM models, auto-discovered) ----
+  custom:
+    - name: 'XCity AI'
+      apiKey: '${LITELLM_API_KEY}'
+      baseURL: 'https://tokenhub.xcity.one/v1'
+      models:
+        # `default` is REQUIRED and must be non-empty even with fetch:true.
+        # fetch:true pulls the live model list from /v1/models (filtered by the
+        # key's model access), so this placeholder is replaced at runtime.
+        default: ['deepseek-v4-flash-260425']
+        fetch: true
+      titleConvo: true
+      modelDisplayLabel: 'XCity AI'
+
+  # ---- Agents (built in LibreChat, run on the 'XCity AI' models + MCP tools) ----
+  # Capabilities are the verified AgentCapabilities enum values only.
+  agents:
+    recursionLimit: 25
+    disableBuilder: false
+    maxCitations: 30
+    maxCitationsPerFile: 7
+    minRelevanceScore: 0.45
+    capabilities:
+      - execute_code
+      - file_search
+      - web_search
+      - artifacts
+      - subagents
+      - actions
+      - context
+      - skills
+      - tools
+      - chain
+      - ocr
+      - deferred_tools
+
+interface:
+  agents:
+    use: true
+    create: true
+    share: false
+    public: false
+
+# ---------------------------------------------------------------------------
+# MCP servers
+# ---------------------------------------------------------------------------
+# Discovery WAS run against the proxy (GET /v1/mcp/server, the singular route —
+# /v1/mcp/servers 404s): as of 2026-06-04 there are 0 MCP servers registered in
+# LiteLLM, so there is nothing to wire yet. When you register upstream MCP
+# servers in LiteLLM, list them and add one block per server here:
+#
+#   curl -sS -H "Authorization: Bearer <MASTER_KEY>" https://tokenhub.xcity.one/v1/mcp/server
+#
+# then, using each server's alias, uncomment and replicate:
+#
+# mcpServers:
+#   <alias>:
+#     type: streamable-http
+#     url: https://tokenhub.xcity.one/<alias>/mcp
+#     headers:
+#       Authorization: 'Bearer ${LITELLM_API_KEY}'
+#     timeout: 60000
+
+# ---------------------------------------------------------------------------
+# Actions (OpenAPI) — for in-chat Video / Audio generation
+# ---------------------------------------------------------------------------
+# LibreChat has no native video/audio tool. Expose the fal media gateway
+# (xct-infra-fal: synchronous /generate/video [kling] and /generate/audio
+# [stable-audio]) as an Agent Action. The gateway is a FastAPI app and already
+# serves an OpenAPI spec at /openapi.json — import that URL in the Agent
+# builder (Add Actions). Add-Action requests are validated against this domain
+# allowlist, so the gateway host must be listed here once it is deployed:
+#
+# actions:
+#   allowedDomains:
+#     - '<your-fal-gateway-host>'        # e.g. fal-gateway.up.railway.app
+#
+# Alternative (keep everything behind LiteLLM): register the gateway as an MCP
+# server in LiteLLM and wire it under `mcpServers:` above instead of an Action.

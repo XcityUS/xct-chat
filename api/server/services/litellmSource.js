@@ -1,0 +1,167 @@
+const axios = require('axios');
+const { logger } = require('@librechat/data-schemas');
+
+/**
+ * Integration with the XCity LiteLLM gateway (tokenhub.xcity.one) as an external,
+ * read-only source for the Agent Marketplace and Skills board.
+ *
+ * Everything here is GATED behind env flags and FAIL-SAFE: any error (or a
+ * disabled flag) returns an empty list so the local MongoDB-backed marketplace /
+ * skills experience is never affected.
+ *
+ * Env:
+ *   LITELLM_BASEURL          e.g. https://tokenhub.xcity.one   (trailing /v1 optional)
+ *   LITELLM_API_KEY          virtual key used for chat (reused here)
+ *   LITELLM_AGENTS_ENABLED   "true" to surface LiteLLM /v1/agents in the marketplace
+ *   LITELLM_SKILLS_ENABLED   "true" to surface LiteLLM /v1/xct-skills in the skills board
+ */
+
+/** Normalize the configured base URL to the proxy root (no trailing slash, no /v1). */
+function getBaseUrl() {
+  const raw = process.env.LITELLM_BASEURL || process.env.LITELLM_AGENTS_BASEURL || '';
+  return raw
+    .trim()
+    .replace(/\/+$/, '')
+    .replace(/\/v1$/, '');
+}
+
+function flagEnabled(name) {
+  return String(process.env[name] || '').toLowerCase() === 'true';
+}
+
+function hasCredentials() {
+  return !!process.env.LITELLM_API_KEY && !!getBaseUrl();
+}
+
+function authHeaders() {
+  return { Authorization: `Bearer ${process.env.LITELLM_API_KEY}` };
+}
+
+const agentsEnabled = () => flagEnabled('LITELLM_AGENTS_ENABLED') && hasCredentials();
+const skillsEnabled = () => flagEnabled('LITELLM_SKILLS_ENABLED') && hasCredentials();
+
+/** Coerce various list-response envelopes into a plain array. */
+function asArray(payload) {
+  if (Array.isArray(payload)) {
+    return payload;
+  }
+  return payload?.data ?? payload?.agents ?? payload?.skills ?? [];
+}
+
+/**
+ * Map a LiteLLM A2A agent record to the marketplace agent shape the LibreChat UI
+ * renders. External agents are display-only (prefixed id, marked `_external`).
+ */
+function mapAgent(record) {
+  const card = record?.agent_card_params || {};
+  const rawId = record?.agent_id || record?.agent_name || card?.name || '';
+  return {
+    id: `litellm:${rawId}`,
+    name: card.name || record?.agent_name || 'Agent',
+    description: card.description || '',
+    category: 'external',
+    avatar: card.iconUrl ? { source: 'url', filepath: card.iconUrl } : null,
+    authorName: 'XCity Hub',
+    isPublic: true,
+    provider: 'litellm',
+    source: 'litellm',
+    version: card.version,
+    _external: true,
+  };
+}
+
+function mapSkill(record) {
+  const rawId = record?.skill_id || record?.id || '';
+  return {
+    id: `litellm:${rawId}`,
+    name: record?.display_title || record?.name || 'Skill',
+    description: record?.description || '',
+    category: 'external',
+    isPublic: true,
+    source: 'litellm',
+    version: record?.version,
+    _external: true,
+  };
+}
+
+/** Fetch public agents from the LiteLLM Agent Hub. Returns [] on any failure. */
+async function fetchAgents({ search } = {}) {
+  if (!agentsEnabled()) {
+    return [];
+  }
+  try {
+    const resp = await axios.get(`${getBaseUrl()}/v1/agents`, {
+      headers: authHeaders(),
+      params: { is_public: true, ...(search ? { q: search } : {}) },
+      timeout: 8000,
+    });
+    return asArray(resp.data).map(mapAgent);
+  } catch (err) {
+    logger.warn(`[litellmSource] fetchAgents failed: ${err.message}`);
+    return [];
+  }
+}
+
+/** Fetch skills from the LiteLLM xct-skills registry. Returns [] on any failure. */
+async function fetchSkills({ search } = {}) {
+  if (!skillsEnabled()) {
+    return [];
+  }
+  try {
+    const resp = await axios.get(`${getBaseUrl()}/v1/xct-skills`, {
+      headers: authHeaders(),
+      params: { ...(search ? { q: search } : {}) },
+      timeout: 8000,
+    });
+    return asArray(resp.data).map(mapSkill);
+  } catch (err) {
+    logger.warn(`[litellmSource] fetchSkills failed: ${err.message}`);
+    return [];
+  }
+}
+
+/**
+ * Prepend external LiteLLM agents into a marketplace list response (mutates
+ * `data.data`). First page only, and only for the "all"/"external" tabs so it
+ * does not pollute curated local categories. Never throws.
+ */
+async function injectAgents(data, { category, search, cursor } = {}) {
+  try {
+    if (!agentsEnabled() || cursor) {
+      return;
+    }
+    if (category && category !== 'all' && category !== 'external') {
+      return;
+    }
+    const external = await fetchAgents({ search });
+    if (external.length) {
+      data.data = [...external, ...(data?.data ?? [])];
+    }
+  } catch (err) {
+    logger.warn(`[litellmSource] injectAgents error: ${err.message}`);
+  }
+}
+
+/** Append external LiteLLM skills into a skills list response. Never throws. */
+async function injectSkills(data, { search, cursor } = {}) {
+  try {
+    if (!skillsEnabled() || cursor) {
+      return;
+    }
+    const external = await fetchSkills({ search });
+    if (external.length) {
+      data.data = [...external, ...(data?.data ?? [])];
+    }
+  } catch (err) {
+    logger.warn(`[litellmSource] injectSkills error: ${err.message}`);
+  }
+}
+
+module.exports = {
+  agentsEnabled,
+  skillsEnabled,
+  fetchAgents,
+  fetchSkills,
+  injectAgents,
+  injectSkills,
+};

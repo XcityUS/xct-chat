@@ -284,7 +284,26 @@ router.post(
   importHandler,
 );
 
-router.get('/', handlers.list);
+// Gated, fail-safe: surface external LiteLLM-hosted skills alongside local ones.
+// Wraps res.json to prepend external skills; pure passthrough when disabled or on
+// any error, so the local skills board is never affected.
+const { injectSkills: injectLiteLLMSkills } = require('~/server/services/litellmSource');
+router.get('/', (req, res, next) => {
+  const origJson = res.json.bind(res);
+  res.json = (body) => {
+    if (!body || !Array.isArray(body.data)) {
+      return origJson(body);
+    }
+    injectLiteLLMSkills(body, {
+      search: req.query.search || req.query.q,
+      cursor: req.query.cursor,
+    })
+      .catch(() => {})
+      .finally(() => origJson(body));
+    return res;
+  };
+  return handlers.list(req, res, next);
+});
 router.post('/', checkSkillCreate, handlers.create);
 
 router.get(

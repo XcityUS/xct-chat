@@ -49,6 +49,7 @@ const {
   userCanUseMCPServers,
 } = require('~/server/services/MCP');
 const { getMCPServersRegistry } = require('~/config');
+const { injectAgents: injectLiteLLMAgents } = require('~/server/services/litellmSource');
 const { getLogStores } = require('~/cache');
 const db = require('~/models');
 
@@ -1026,6 +1027,9 @@ const getListAgentsHandler = async (req, res) => {
 
     const agents = data?.data ?? [];
     if (!agents.length) {
+      // Fail-safe, gated: surface external LiteLLM-hosted agents even when the
+      // user has no local agents on the first page.
+      await injectLiteLLMAgents(data, { category, search, cursor });
       return res.json(data);
     }
 
@@ -1066,6 +1070,8 @@ const getListAgentsHandler = async (req, res) => {
       return agent;
     });
 
+    // Fail-safe, gated: prepend external LiteLLM-hosted agents into the marketplace.
+    await injectLiteLLMAgents(data, { category, search, cursor });
     return res.json(data);
   } catch (error) {
     logger.error('[/Agents] Error listing Agents: %o', error);

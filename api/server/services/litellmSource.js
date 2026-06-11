@@ -19,10 +19,7 @@ const { logger } = require('@librechat/data-schemas');
 /** Normalize the configured base URL to the proxy root (no trailing slash, no /v1). */
 function getBaseUrl() {
   const raw = process.env.LITELLM_BASEURL || process.env.LITELLM_AGENTS_BASEURL || '';
-  return raw
-    .trim()
-    .replace(/\/+$/, '')
-    .replace(/\/v1$/, '');
+  return raw.trim().replace(/\/+$/, '').replace(/\/v1$/, '');
 }
 
 function flagEnabled(name) {
@@ -157,11 +154,77 @@ async function injectSkills(data, { search, cursor } = {}) {
   }
 }
 
+const publishEnabled = () => flagEnabled('LITELLM_PUBLISH_ENABLED') && hasCredentials();
+
+/**
+ * P4 publish-sync: push a LibreChat-built agent to the tokenhub registry
+ * (POST /v1/agents) so it surfaces in xct-home's catalog and becomes a
+ * platform-wide consumption unit.
+ *
+ * Same contract as everything else in this module — gated
+ * (LITELLM_PUBLISH_ENABLED) and fail-safe: never throws, returns
+ * `{ published: false, reason }` on any problem.
+ *
+ * @param {object} agent - LibreChat agent document (id, name, description,
+ *   instructions, model, tools).
+ * @returns {Promise<{published: boolean, agent_id?: string, reason?: string}>}
+ */
+async function publishAgent(agent) {
+  if (!publishEnabled()) {
+    return { published: false, reason: 'disabled' };
+  }
+  if (!agent?.id || !agent?.name) {
+    return { published: false, reason: 'invalid_agent' };
+  }
+  try {
+    // A2A-style agent card; skills encode the resource composition so the
+    // registry (and xct-home's catalog) knows what the agent is made of.
+    const skills = [
+      ...(agent.model
+        ? [
+            {
+              id: `model:${agent.model}`,
+              name: agent.model,
+              description: 'Driving model',
+              tags: ['model'],
+            },
+          ]
+        : []),
+      ...(agent.tools ?? []).map((tool) => ({
+        id: `tool:${tool}`,
+        name: tool,
+        description: 'Agent tool',
+        tags: ['tool'],
+      })),
+    ];
+    const body = {
+      agent_name: `xct-${agent.id}`,
+      agent_card_params: {
+        name: agent.name,
+        description: agent.description || '',
+        skills,
+      },
+    };
+    const resp = await axios.post(`${getBaseUrl()}/v1/agents`, body, {
+      headers: authHeaders(),
+      timeout: 8000,
+    });
+    const agentId = resp?.data?.agent_id || resp?.data?.id || body.agent_name;
+    logger.info(`[litellmSource] published agent ${agent.id} → ${agentId}`);
+    return { published: true, agent_id: agentId };
+  } catch (err) {
+    logger.warn(`[litellmSource] publishAgent failed: ${err.message}`);
+    return { published: false, reason: err.message };
+  }
+}
+
 module.exports = {
   agentsEnabled,
   skillsEnabled,
+  publishEnabled,
   fetchAgents,
   fetchSkills,
   injectAgents,
   injectSkills,
+  publishAgent,
 };

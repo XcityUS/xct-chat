@@ -33,6 +33,16 @@ jest.mock('~/app/config', () => ({
   getCustomEndpointConfig: (...args: unknown[]) => mockGetCustomEndpointConfig(...args),
 }));
 
+// XCT fork: per-user vkey exchange (see FORK-CHANGES.md).
+const mockIsXctEndpoint = jest.fn().mockReturnValue(false);
+const mockXctEnabled = jest.fn().mockReturnValue(false);
+const mockResolveUserVKey = jest.fn().mockResolvedValue(null);
+jest.mock('./xctKeyExchange', () => ({
+  isXctEndpoint: (...args: unknown[]) => mockIsXctEndpoint(...args),
+  xctKeyExchangeEnabled: (...args: unknown[]) => mockXctEnabled(...args),
+  resolveUserVKey: (...args: unknown[]) => mockResolveUserVKey(...args),
+}));
+
 import { initializeCustom } from './initialize';
 
 function createParams(overrides: {
@@ -208,5 +218,70 @@ describe('initializeCustom – SSRF guard wiring', () => {
 
     await expect(initializeCustom(params)).rejects.toThrow('targets a restricted address');
     expect(mockGetOpenAIConfig).not.toHaveBeenCalled();
+  });
+});
+
+describe('initializeCustom – XCT per-user vkey exchange (fork)', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockIsXctEndpoint.mockReturnValue(false);
+    mockXctEnabled.mockReturnValue(false);
+    mockResolveUserVKey.mockResolvedValue(null);
+  });
+
+  it('swaps in the user vkey for the XCT endpoint when the exchange succeeds', async () => {
+    mockIsXctEndpoint.mockReturnValue(true);
+    mockXctEnabled.mockReturnValue(true);
+    mockResolveUserVKey.mockResolvedValue('sk-xcity-user-vkey');
+
+    const params = createParams({ apiKey: 'sk-shared-key' });
+    await initializeCustom(params);
+
+    expect(mockResolveUserVKey).toHaveBeenCalledWith(params.req.user);
+    expect(mockGetOpenAIConfig).toHaveBeenCalledWith(
+      'sk-xcity-user-vkey',
+      expect.any(Object),
+      'test-custom',
+    );
+  });
+
+  it('falls back to the shared key when the exchange resolves null (fail-safe)', async () => {
+    mockIsXctEndpoint.mockReturnValue(true);
+    mockXctEnabled.mockReturnValue(true);
+    mockResolveUserVKey.mockResolvedValue(null);
+
+    const params = createParams({ apiKey: 'sk-shared-key' });
+    await initializeCustom(params);
+
+    expect(mockGetOpenAIConfig).toHaveBeenCalledWith(
+      'sk-shared-key',
+      expect.any(Object),
+      'test-custom',
+    );
+  });
+
+  it('never exchanges for non-XCT endpoints', async () => {
+    mockIsXctEndpoint.mockReturnValue(false);
+    mockXctEnabled.mockReturnValue(true);
+
+    const params = createParams({ apiKey: 'sk-shared-key' });
+    await initializeCustom(params);
+
+    expect(mockResolveUserVKey).not.toHaveBeenCalled();
+    expect(mockGetOpenAIConfig).toHaveBeenCalledWith(
+      'sk-shared-key',
+      expect.any(Object),
+      'test-custom',
+    );
+  });
+
+  it('never exchanges when the feature flag is off', async () => {
+    mockIsXctEndpoint.mockReturnValue(true);
+    mockXctEnabled.mockReturnValue(false);
+
+    const params = createParams({ apiKey: 'sk-shared-key' });
+    await initializeCustom(params);
+
+    expect(mockResolveUserVKey).not.toHaveBeenCalled();
   });
 });

@@ -54,6 +54,11 @@ endpoints:
       - ocr
       - deferred_tools
 
+# Agent-first positioning: Agents are the primary consumption surface
+# (xct-home deep-links land on /c/new?agent_id=…); direct model chat via the
+# 'XCity AI' endpoint stays available (/c/new?endpoint=XCity%20AI&model=…)
+# but is the secondary path. Both run on the user's own virtual key when the
+# XCT key exchange is enabled (FORK-CHANGES.md §1) — same budget pool.
 interface:
   agents:
     use: true

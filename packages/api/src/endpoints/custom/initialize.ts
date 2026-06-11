@@ -13,6 +13,8 @@ import { getCustomEndpointConfig } from '~/app/config';
 import { fetchModels } from '~/endpoints/models';
 import { validateEndpointURL } from '~/auth';
 import { tokenConfigCache } from '~/cache';
+// XCT fork: per-user vkey exchange for the gateway endpoint (FORK-CHANGES.md).
+import { isXctEndpoint, resolveUserVKey, xctKeyExchangeEnabled } from './xctKeyExchange';
 
 const { PROXY } = process.env;
 
@@ -100,8 +102,19 @@ export async function initializeCustom({
     userValues = await db.getUserKeyValues({ userId: req.user?.id ?? '', name: endpoint });
   }
 
-  const apiKey = userProvidesKey ? userValues?.apiKey : CUSTOM_API_KEY;
+  let apiKey = userProvidesKey ? userValues?.apiKey : CUSTOM_API_KEY;
   const baseURL = userProvidesURL ? userValues?.baseURL : CUSTOM_BASE_URL;
+
+  // XCT fork: for the XCity gateway endpoint, swap the shared key for the
+  // user's own LiteLLM virtual key (per-plan models/budget/RPM enforced by
+  // the gateway). Fail-safe: a null exchange keeps the shared key so chat
+  // survives wallet outages.
+  if (xctKeyExchangeEnabled() && isXctEndpoint(endpoint)) {
+    const userVKey = await resolveUserVKey(req.user);
+    if (userVKey) {
+      apiKey = userVKey;
+    }
+  }
 
   if (userProvidesKey && !apiKey) {
     throw new Error(

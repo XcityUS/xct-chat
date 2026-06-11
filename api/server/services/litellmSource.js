@@ -19,10 +19,7 @@ const { logger } = require('@librechat/data-schemas');
 /** Normalize the configured base URL to the proxy root (no trailing slash, no /v1). */
 function getBaseUrl() {
   const raw = process.env.LITELLM_BASEURL || process.env.LITELLM_AGENTS_BASEURL || '';
-  return raw
-    .trim()
-    .replace(/\/+$/, '')
-    .replace(/\/v1$/, '');
+  return raw.trim().replace(/\/+$/, '').replace(/\/v1$/, '');
 }
 
 function flagEnabled(name) {
@@ -184,7 +181,14 @@ async function publishAgent(agent) {
     // registry (and xct-home's catalog) knows what the agent is made of.
     const skills = [
       ...(agent.model
-        ? [{ id: `model:${agent.model}`, name: agent.model, description: 'Driving model', tags: ['model'] }]
+        ? [
+            {
+              id: `model:${agent.model}`,
+              name: agent.model,
+              description: 'Driving model',
+              tags: ['model'],
+            },
+          ]
         : []),
       ...(agent.tools ?? []).map((tool) => ({
         id: `tool:${tool}`,

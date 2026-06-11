@@ -97,7 +97,10 @@ describe('xctKeyExchange', () => {
         ok: true,
         json: async () => ({ key: 'sk-prefixed' }),
       });
-      const key = await resolveUserVKey({ id: 'x', openidId: `https://auth.xcity.one|${GOTRUE_SUB}` });
+      const key = await resolveUserVKey({
+        id: 'x',
+        openidId: `https://auth.xcity.one|${GOTRUE_SUB}`,
+      });
       expect(key).toBe('sk-prefixed');
       expect(JSON.parse(mockFetch.mock.calls[0][1].body).user_id).toBe(GOTRUE_SUB);
     });

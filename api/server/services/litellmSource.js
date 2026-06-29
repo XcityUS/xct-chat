@@ -99,6 +99,50 @@ async function fetchAgents({ search } = {}) {
   }
 }
 
+// Short-lived cache for the agent→model-id list. /api/models is hit on every
+// app load, but the agent roster changes rarely — a 60s TTL keeps the gateway
+// from being polled on each request without making the list go stale.
+let agentModelIdsCache = { ids: null, expires: 0 };
+const AGENT_MODEL_IDS_TTL_MS = 60 * 1000;
+
+/**
+ * Fetch public LiteLLM agents and project them to the callable model ids the
+ * gateway exposes them under — `a2a/<agent_name>` (see xcity-litellm
+ * agent_endpoints/a2a_routing). These are appended to the XCity AI endpoint's
+ * model list so deep links like `?endpoint=XCity AI&model=a2a/xct-<slug>` from
+ * xct-home resolve to a known model instead of being reset to the default.
+ *
+ * Gated by the same flag as the marketplace agents (LITELLM_AGENTS_ENABLED) and
+ * fail-safe: returns [] on a disabled flag or any error.
+ *
+ * @returns {Promise<string[]>} e.g. ["a2a/xct-research", "a2a/xct-writing"]
+ */
+async function fetchAgentModelIds() {
+  if (!agentsEnabled()) {
+    return [];
+  }
+  const now = Date.now();
+  if (agentModelIdsCache.ids && agentModelIdsCache.expires > now) {
+    return agentModelIdsCache.ids;
+  }
+  try {
+    const resp = await axios.get(`${getBaseUrl()}/v1/agents`, {
+      headers: authHeaders(),
+      params: { is_public: true },
+      timeout: 8000,
+    });
+    const ids = asArray(resp.data)
+      .map((record) => record?.agent_name || record?.agent_id || '')
+      .filter(Boolean)
+      .map((agentName) => `a2a/${agentName}`);
+    agentModelIdsCache = { ids, expires: now + AGENT_MODEL_IDS_TTL_MS };
+    return ids;
+  } catch (err) {
+    logger.warn(`[litellmSource] fetchAgentModelIds failed: ${err.message}`);
+    return [];
+  }
+}
+
 /** Fetch skills from the LiteLLM xct-skills registry. Returns [] on any failure. */
 async function fetchSkills({ search } = {}) {
   if (!skillsEnabled()) {
@@ -223,6 +267,7 @@ module.exports = {
   skillsEnabled,
   publishEnabled,
   fetchAgents,
+  fetchAgentModelIds,
   fetchSkills,
   injectAgents,
   injectSkills,

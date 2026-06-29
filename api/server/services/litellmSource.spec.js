@@ -92,3 +92,79 @@ describe('litellmSource.publishAgent', () => {
     expect(axios.post).not.toHaveBeenCalled();
   });
 });
+
+describe('litellmSource.fetchAgentModelIds', () => {
+  let freshAxios;
+  let fetchAgentModelIds;
+
+  // The module caches the id list for 60s, so re-require a fresh module (and a
+  // fresh axios automock) per test to keep cases independent.
+  beforeEach(() => {
+    jest.resetModules();
+    jest.clearAllMocks();
+    process.env = { ...ORIGINAL_ENV };
+    process.env.LITELLM_BASEURL = 'https://tokenhub.test';
+    process.env.LITELLM_API_KEY = 'sk-svc';
+    delete process.env.LITELLM_AGENTS_ENABLED;
+    freshAxios = require('axios');
+    ({ fetchAgentModelIds } = require('./litellmSource'));
+  });
+
+  afterAll(() => {
+    process.env = ORIGINAL_ENV;
+  });
+
+  it('is disabled by default (no gateway call)', async () => {
+    const ids = await fetchAgentModelIds();
+    expect(ids).toEqual([]);
+    expect(freshAxios.get).not.toHaveBeenCalled();
+  });
+
+  it('maps public agents to a2a/<agent_name> model ids when enabled', async () => {
+    process.env.LITELLM_AGENTS_ENABLED = 'true';
+    freshAxios.get.mockResolvedValue({
+      data: [
+        { agent_name: 'xct-research', agent_id: 'a1' },
+        { agent_name: 'xct-writing', agent_id: 'a2' },
+      ],
+    });
+
+    const ids = await fetchAgentModelIds();
+
+    expect(ids).toEqual(['a2a/xct-research', 'a2a/xct-writing']);
+    const [url, config] = freshAxios.get.mock.calls[0];
+    expect(url).toBe('https://tokenhub.test/v1/agents');
+    expect(config.params).toMatchObject({ is_public: true });
+    expect(config.headers.Authorization).toBe('Bearer sk-svc');
+  });
+
+  it('falls back to agent_id when agent_name is missing, and skips empties', async () => {
+    process.env.LITELLM_AGENTS_ENABLED = 'true';
+    freshAxios.get.mockResolvedValue({
+      data: [{ agent_id: 'a1' }, { description: 'nameless' }],
+    });
+
+    const ids = await fetchAgentModelIds();
+    expect(ids).toEqual(['a2a/a1']);
+  });
+
+  it('caches within the TTL (second call makes no gateway request)', async () => {
+    process.env.LITELLM_AGENTS_ENABLED = 'true';
+    freshAxios.get.mockResolvedValue({ data: [{ agent_name: 'xct-research' }] });
+
+    const first = await fetchAgentModelIds();
+    const second = await fetchAgentModelIds();
+
+    expect(first).toEqual(['a2a/xct-research']);
+    expect(second).toEqual(['a2a/xct-research']);
+    expect(freshAxios.get).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns [] on gateway errors instead of throwing', async () => {
+    process.env.LITELLM_AGENTS_ENABLED = 'true';
+    freshAxios.get.mockRejectedValue(new Error('503 from gateway'));
+
+    const ids = await fetchAgentModelIds();
+    expect(ids).toEqual([]);
+  });
+});

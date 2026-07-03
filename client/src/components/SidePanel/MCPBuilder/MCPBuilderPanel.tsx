@@ -85,6 +85,7 @@ export default function MCPBuilderPanel() {
             servers={filteredServers}
             getServerStatusIconProps={getServerStatusIconProps}
             isFiltered={searchQuery.trim().length > 0}
+            onAdd={hasCreateAccess ? () => setShowDialog(true) : undefined}
           />
         )}
 

@@ -1,7 +1,9 @@
+import { Plug } from 'lucide-react';
 import { MCPIcon } from '@librechat/client';
 import { PermissionTypes, Permissions } from 'librechat-data-provider';
 import type { MCPServerStatusIconProps } from '~/components/MCP/MCPServerStatusIcon';
 import type { MCPServerDefinition } from '~/hooks';
+import { DashboardEmptyState } from '~/components/ui';
 import { useLocalize, useHasAccess } from '~/hooks';
 import MCPServerCard from './MCPServerCard';
 
@@ -9,6 +11,7 @@ interface MCPServerListProps {
   servers: MCPServerDefinition[];
   getServerStatusIconProps: (serverName: string) => MCPServerStatusIconProps;
   isFiltered?: boolean;
+  onAdd?: () => void;
 }
 
 /**
@@ -18,6 +21,7 @@ export default function MCPServerList({
   servers,
   getServerStatusIconProps,
   isFiltered = false,
+  onAdd,
 }: MCPServerListProps) {
   const localize = useLocalize();
   const canCreateEditMCPs = useHasAccess({
@@ -26,24 +30,27 @@ export default function MCPServerList({
   });
 
   if (servers.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center rounded-lg border border-border-light bg-transparent p-6 text-center">
-        <div className="mb-2 flex size-10 items-center justify-center rounded-full bg-surface-tertiary">
-          <MCPIcon className="size-5 text-text-secondary" aria-hidden="true" />
-        </div>
-        {isFiltered ? (
+    if (isFiltered) {
+      return (
+        <div className="flex flex-col items-center justify-center rounded-lg border border-border-light bg-transparent p-6 text-center">
+          <div className="mb-2 flex size-10 items-center justify-center rounded-full bg-surface-tertiary">
+            <MCPIcon className="size-5 text-text-secondary" aria-hidden="true" />
+          </div>
           <p className="text-sm text-text-secondary">{localize('com_ui_no_mcp_servers_match')}</p>
-        ) : (
-          <>
-            <p className="text-sm font-medium text-text-primary">
-              {localize('com_ui_no_mcp_servers')}
-            </p>
-            <p className="mt-0.5 text-xs text-text-secondary">
-              {localize('com_ui_add_first_mcp_server')}
-            </p>
-          </>
-        )}
-      </div>
+        </div>
+      );
+    }
+    return (
+      <DashboardEmptyState
+        icon={Plug}
+        title={localize('com_ui_empty_integrations_title')}
+        description={localize('com_ui_empty_integrations_desc')}
+        ctaLabel={localize('com_ui_empty_integrations_cta')}
+        onCta={onAdd}
+        helpLabel={localize('com_ui_empty_integrations_help')}
+        helpHref="https://docs.xcity.ai/integrations"
+        className="py-6"
+      />
     );
   }
 

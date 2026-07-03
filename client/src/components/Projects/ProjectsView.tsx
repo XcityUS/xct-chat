@@ -1,11 +1,12 @@
 import { useDeferredValue, useEffect, useId, useMemo, useState } from 'react';
 import * as Ariakit from '@ariakit/react';
-import { ArrowUpDown, Check, Folder, Plus, Search } from 'lucide-react';
+import { ArrowUpDown, Check, Folder, FolderOpen, Plus, Search } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import type { TChatProject } from 'librechat-data-provider';
 import { Input, Button, Spinner, DropdownPopup } from '@librechat/client';
 import type { MenuItemProps, RenderProp } from '~/common';
 import { useProjectsInfiniteQuery } from '~/data-provider';
+import { DashboardEmptyState } from '~/components/ui';
 import { useLocalize } from '~/hooks';
 import { cn } from '~/utils';
 import ProjectCreateDialog from './ProjectCreateDialog';
@@ -217,9 +218,15 @@ export default function ProjectsView() {
         )}
 
         {!isLoading && projects.length === 0 && (
-          <div className="rounded-lg border border-border-medium bg-transparent py-16 text-center text-sm text-text-secondary">
-            {localize('com_ui_no_projects')}
-          </div>
+          <DashboardEmptyState
+            icon={FolderOpen}
+            title={localize('com_ui_empty_projects_title')}
+            description={localize('com_ui_empty_projects_desc')}
+            ctaLabel={localize('com_ui_empty_projects_cta')}
+            onCta={() => setIsCreating(true)}
+            helpLabel={localize('com_ui_empty_projects_help')}
+            helpHref="https://docs.xcity.ai/projects"
+          />
         )}
 
         {hasNextPage && (

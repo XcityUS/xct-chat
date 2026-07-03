@@ -1,6 +1,6 @@
 import { useMemo, memo, type FC, useCallback, useEffect, useRef } from 'react';
 import throttle from 'lodash/throttle';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, MessageSquare } from 'lucide-react';
 import { useRecoilValue } from 'recoil';
 import { useQueryClient } from '@tanstack/react-query';
 import { QueryKeys } from 'librechat-data-provider';
@@ -15,6 +15,7 @@ import {
   useNewConvo,
 } from '~/hooks';
 import FavoritesList from '~/components/Nav/Favorites/FavoritesList';
+import { DashboardEmptyState } from '~/components/ui';
 import { useActiveJobs } from '~/data-provider';
 import { groupConversationsByDate, clearMessagesCache, cn } from '~/utils';
 import Convo from './Convo';
@@ -386,6 +387,12 @@ const Conversations: FC<ConversationsProps> = ({
     [flattenedItems.length, throttledLoadMore],
   );
 
+  const showConvsEmptyState =
+    !isSearchLoading &&
+    !isLoading &&
+    !search.query &&
+    filteredConversations.length === 0;
+
   return (
     <div className="relative flex h-full min-h-0 flex-col pb-2 text-sm text-text-primary">
       <div className="px-3">
@@ -399,6 +406,17 @@ const Conversations: FC<ConversationsProps> = ({
           <Spinner className="text-text-primary" />
           <span className="ml-2 text-text-primary">{localize('com_ui_loading')}</span>
         </div>
+      ) : showConvsEmptyState ? (
+        <DashboardEmptyState
+          icon={MessageSquare}
+          title={localize('com_ui_empty_conversations_title')}
+          description={localize('com_ui_empty_conversations_desc')}
+          ctaLabel={localize('com_ui_empty_conversations_cta')}
+          ctaTo="/c/new"
+          helpLabel={localize('com_ui_empty_conversations_help')}
+          helpTo="/agents"
+          className="py-8"
+        />
       ) : (
         <div className="flex-1">
           <AutoSizer>

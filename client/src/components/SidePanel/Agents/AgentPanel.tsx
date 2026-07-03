@@ -1,5 +1,5 @@
 import React, { useMemo, useCallback, useRef, useState } from 'react';
-import { Plus } from 'lucide-react';
+import { Bot, Plus } from 'lucide-react';
 import { Button, useToastContext } from '@librechat/client';
 import { useWatch, useForm, FormProvider } from 'react-hook-form';
 import { useGetModelsQuery } from 'librechat-data-provider/react-query';
@@ -16,6 +16,7 @@ import type { Agent } from 'librechat-data-provider';
 import type { TranslationKeys } from '~/hooks/useLocalize';
 import type { AgentForm, StringOption } from '~/common';
 import {
+  useListAgentsQuery,
   useCreateAgentMutation,
   useUpdateAgentMutation,
   useGetAgentByIdQuery,
@@ -24,7 +25,8 @@ import {
 } from '~/data-provider';
 import { createProviderOption, getDefaultAgentFormValues } from '~/utils';
 import { useResourcePermissions } from '~/hooks/useResourcePermissions';
-import { useSelectAgent, useLocalize, useAuthContext } from '~/hooks';
+import { DashboardEmptyState } from '~/components/ui';
+import { useSelectAgent, useLocalize, useAuthContext, useAgentDefaultPermissionLevel } from '~/hooks';
 import { useAgentPanelContext } from '~/Providers/AgentPanelContext';
 import AgentPanelSkeleton from './AgentPanelSkeleton';
 import AdvancedPanel from './Advanced/AdvancedPanel';
@@ -226,6 +228,13 @@ export default function AgentPanel() {
   } = useAgentPanelContext();
 
   const { onSelect: onSelectAgent } = useSelectAgent();
+
+  const permissionLevel = useAgentDefaultPermissionLevel();
+  const { data: agentsList = null, isLoading: isLoadingAgentsList } = useListAgentsQuery({
+    requiredPermission: permissionLevel,
+  });
+  const hasNoAgents =
+    !isLoadingAgentsList && Array.isArray(agentsList?.data) && agentsList.data.length === 0;
 
   const modelsQuery = useGetModelsQuery({ refetchOnMount: 'always' });
   const basicAgentQuery = useGetAgentByIdQuery(current_agent_id);
@@ -490,6 +499,17 @@ export default function AgentPanel() {
         aria-label="Agent configuration form"
       >
         <div className="flex-1">
+          {hasNoAgents && !current_agent_id && (
+            <DashboardEmptyState
+              icon={Bot}
+              title={localize('com_ui_empty_agents_title')}
+              description={localize('com_ui_empty_agents_desc')}
+              ctaLabel={localize('com_ui_empty_agents_cta')}
+              helpLabel={localize('com_ui_empty_agents_help')}
+              helpTo="/agents"
+              className="py-8"
+            />
+          )}
           <div className="flex w-full flex-wrap gap-2">
             <div className="w-full">
               <AgentSelect

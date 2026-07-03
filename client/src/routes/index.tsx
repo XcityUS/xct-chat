@@ -19,6 +19,8 @@ import LoginLayout from './Layouts/Login';
 import dashboardRoutes from './Dashboard';
 import ShareRoute from './ShareRoute';
 import ChatRoute from './ChatRoute';
+import SettingsLanding from './SettingsLanding';
+import TeamPage from './Team';
 import Search from './Search';
 import Root from './Root';
 
@@ -169,6 +171,14 @@ export const router = createBrowserRouter(
             {
               path: 'projects/:projectId',
               lazy: loadProjectWorkspace,
+            },
+            {
+              path: 'team',
+              element: <TeamPage />,
+            },
+            {
+              path: 'settings',
+              element: <SettingsLanding />,
             },
             {
               path: 'agents',

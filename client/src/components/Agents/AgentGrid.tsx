@@ -1,10 +1,12 @@
 import React, { useMemo, useEffect } from 'react';
+import { Bot, Search } from 'lucide-react';
 import { Spinner } from '@librechat/client';
 import { PermissionBits } from 'librechat-data-provider';
 import type t from 'librechat-data-provider';
 import { useMarketplaceAgentsInfiniteQuery } from '~/data-provider/Agents';
 import { useAgentCategories, useLocalize } from '~/hooks';
 import { useInfiniteScroll } from '~/hooks/useInfiniteScroll';
+import { DashboardEmptyState } from '~/components/ui';
 import { useHasData } from './SmartLoader';
 import ErrorDisplay from './ErrorDisplay';
 import AgentCard from './AgentCard';
@@ -159,17 +161,32 @@ const AgentGrid: React.FC<AgentGridProps> = ({
     >
       {/* Handle empty results with enhanced accessibility */}
       {(!currentAgents || currentAgents.length === 0) && !isLoading && !isFetching ? (
-        <div
-          className="py-12 text-center text-text-secondary"
-          role="status"
-          aria-live="polite"
-          aria-label={
-            searchQuery
-              ? localize('com_agents_search_empty_heading')
-              : localize('com_agents_empty_state_heading')
-          }
-        >
-          <h3 className="mb-2 text-lg font-medium">{localize('com_agents_empty_state_heading')}</h3>
+        <div role="status" aria-live="polite">
+          {searchQuery ? (
+            <DashboardEmptyState
+              icon={Search}
+              title={localize('com_agents_search_empty_heading')}
+              description={localize('com_ui_empty_marketplace_search_desc')}
+              ctaLabel={localize('com_agents_clear_search')}
+              onCta={() => {
+                const url = new URL(window.location.href);
+                url.searchParams.delete('q');
+                window.history.pushState({}, '', url.toString());
+              }}
+              helpLabel={localize('com_ui_empty_marketplace_help')}
+              helpHref="https://docs.xcity.ai/agents"
+            />
+          ) : (
+            <DashboardEmptyState
+              icon={Bot}
+              title={localize('com_ui_empty_marketplace_title')}
+              description={localize('com_ui_empty_marketplace_desc')}
+              ctaLabel={localize('com_ui_empty_marketplace_cta')}
+              ctaTo="/agents"
+              helpLabel={localize('com_ui_empty_marketplace_help')}
+              helpHref="https://docs.xcity.ai/agents"
+            />
+          )}
         </div>
       ) : (
         <>

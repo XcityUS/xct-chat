@@ -1,8 +1,9 @@
 import { useState } from 'react';
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight, ScrollText } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { Skeleton } from '@librechat/client';
 import type { TSkill } from 'librechat-data-provider';
+import { DashboardEmptyState } from '~/components/ui';
 import { useLocalize } from '~/hooks';
 import SkillListItem from './SkillListItem';
 import { cn } from '~/utils';
@@ -56,9 +57,16 @@ export default function SkillList({ skills, isLoading, activeSkillId }: SkillLis
       {sectionOpen && (
         <div className="flex flex-col gap-px">
           {skills.length === 0 ? (
-            <p className="px-3 py-4 text-center text-xs text-text-secondary">
-              {localize('com_ui_skills_empty')}
-            </p>
+            <DashboardEmptyState
+              icon={ScrollText}
+              title={localize('com_ui_empty_skills_title')}
+              description={localize('com_ui_empty_skills_desc')}
+              ctaLabel={localize('com_ui_empty_skills_cta')}
+              ctaTo="/skills/new"
+              helpLabel={localize('com_ui_empty_skills_help')}
+              helpHref="https://docs.xcity.ai/skills"
+              className="py-6"
+            />
           ) : (
             skills.map((skill) => (
               <SkillListItem

@@ -1,21 +1,27 @@
 const { logger } = require('@librechat/data-schemas');
 const { createContentAggregator } = require('@librechat/agents');
 const {
+  checkAccess,
   loadSkillStates,
   initializeAgent,
+  isMemoryEnabled,
   primeInvokedSkills,
   validateAgentModel,
   extractManualSkills,
   GenerationJobManager,
   getCustomEndpointConfig,
   discoverConnectedAgents,
+  resolveAgentTokenConfig,
   resolveAgentScopedSkillIds,
+  resolveModelSpecSkillIds,
   buildAgentContextAttachmentsByAgentId,
 } = require('@librechat/api');
 const {
+  Permissions,
   ResourceType,
   EModelEndpoint,
   PermissionBits,
+  PermissionTypes,
   MAX_SUBAGENT_DEPTH,
   isAgentsEndpoint,
   getResponseSender,
@@ -31,7 +37,9 @@ const { loadAgentTools, loadToolsForExecution } = require('~/server/services/Too
 const { filterFilesByAgentAccess } = require('~/server/services/Files/permissions');
 const {
   getSkillToolDeps,
+  getSkillDbMethods,
   canAuthorSkillFiles,
+  withDeploymentSkillIds,
   buildAgentToolContext,
   enrichLoadedToolsWithAgentContext,
 } = require('./skillDeps');
@@ -133,7 +141,8 @@ const initializeClient = async ({ req, res, signal, endpointOption }) => {
   /** Query accessible skill IDs once per run (shared across all agents).
    *  Skills activate under strict opt-in semantics — see
    *  `resolveAgentScopedSkillIds` for the per-agent activation predicate:
-   *    - Ephemeral agent → per-conversation skills badge toggle (full catalog).
+   *    - Ephemeral agent → model-spec `skills` config first, otherwise the
+   *      per-conversation skills badge toggle (full catalog).
    *    - Persisted agent → `agent.skills_enabled === true`. Optional
    *      `agent.skills` allowlist narrows the catalog; empty/undefined
    *      allowlist with the toggle on = full accessible catalog. */
@@ -141,14 +150,35 @@ const initializeClient = async ({ req, res, signal, endpointOption }) => {
   const skillsCapabilityEnabled = enabledCapabilities.has(AgentCapabilities.skills);
   const codeEnvAvailable = enabledCapabilities.has(AgentCapabilities.execute_code);
   const ephemeralSkillsToggle = req.body?.ephemeralAgent?.skills === true;
+  const skillDbMethods = getSkillDbMethods();
+
+  /** Run-level gate for inline memory tools: the `memory` capability must be
+   *  enabled, memory must be configured, and the user must not have opted out.
+   *  Requires the memory WRITE permissions (CREATE + UPDATE) — both inline tools
+   *  mutate memory — so the tools aren't registered (and shown to the model) for
+   *  read-only-memory roles that the runtime loader would then refuse to build.
+   *  Agents (or the ephemeral memory badge) opt in per-agent via the `memory`
+   *  marker on `tools`. */
+  const memoryAvailable =
+    enabledCapabilities.has(AgentCapabilities.memory) &&
+    isMemoryEnabled(appConfig?.memory) &&
+    req.user?.personalization?.memories !== false &&
+    (await checkAccess({
+      user: req.user,
+      permissionType: PermissionTypes.MEMORIES,
+      permissions: [Permissions.USE, Permissions.CREATE, Permissions.UPDATE],
+      getRoleByName: db.getRoleByName,
+    }));
 
   const accessibleSkillIds = skillsCapabilityEnabled
-    ? await findAccessibleResources({
-        userId: req.user.id,
-        role: req.user.role,
-        resourceType: ResourceType.SKILL,
-        requiredPermissions: PermissionBits.VIEW,
-      })
+    ? withDeploymentSkillIds(
+        await findAccessibleResources({
+          userId: req.user.id,
+          role: req.user.role,
+          resourceType: ResourceType.SKILL,
+          requiredPermissions: PermissionBits.VIEW,
+        }),
+      )
     : [];
   const editableSkillIds = skillsCapabilityEnabled
     ? await findAccessibleResources({
@@ -177,6 +207,7 @@ const initializeClient = async ({ req, res, signal, endpointOption }) => {
    *   agent?: object,
    *   tool_resources?: object,
    *   toolRegistry?: import('@librechat/agents').LCToolRegistry,
+   *   requestScopedConnections?: import('@librechat/api').RequestScopedMCPConnectionStore,
    *   openAIApiKey?: string
    * }>}
    */
@@ -196,6 +227,8 @@ const initializeClient = async ({ req, res, signal, endpointOption }) => {
         toolNames,
         agent: ctx.agent,
         toolRegistry: ctx.toolRegistry,
+        mcpAvailableTools: ctx.mcpAvailableTools,
+        requestScopedConnections: ctx.requestScopedConnections,
         userMCPAuthMap: ctx.userMCPAuthMap,
         tool_resources: ctx.tool_resources,
         actionsEnabled: ctx.actionsEnabled,
@@ -232,6 +265,24 @@ const initializeClient = async ({ req, res, signal, endpointOption }) => {
    */
   const subagentAggregatorsByToolCallId = new Map();
 
+  /** Backend prices each model call authoritatively (premium tiers, cache
+   *  rates) and emits the cost on on_token_usage when contextCost is on, so
+   *  the gauge sums real costs instead of re-deriving from base rates.
+   *  `endpointTokenConfig` is filled in once `primaryConfig` resolves below so
+   *  custom-endpoint agents price with their configured rates, not defaults. */
+  const usageCost = {
+    enabled: appConfig?.interfaceConfig?.contextCost === true,
+    pricing: { getMultiplier: db.getMultiplier, getCacheMultiplier: db.getCacheMultiplier },
+  };
+
+  /** Latest visible context snapshot + every emitted usage payload for this
+   *  response, captured by the handlers and persisted on the response message's
+   *  metadata so the breakdown and branch/total cost survive a reload.
+   *  @type {{ latest: import('librechat-data-provider').TContextUsageEvent | null, count: number }} */
+  const contextUsageSink = { latest: null, count: 0 };
+  /** @type {Array<import('librechat-data-provider').TTokenUsageEvent>} */
+  const usageEmitSink = [];
+
   const eventHandlers = getDefaultHandlers({
     res,
     toolExecuteOptions,
@@ -242,6 +293,9 @@ const initializeClient = async ({ req, res, signal, endpointOption }) => {
     collectedThoughtSignatures,
     streamId,
     subagentAggregatorsByToolCallId,
+    usageCost,
+    contextUsageSink,
+    usageEmitSink,
   });
 
   if (!endpointOption.agent) {
@@ -288,6 +342,34 @@ const initializeClient = async ({ req, res, signal, endpointOption }) => {
    */
   const manualSkills = extractManualSkills(req.body);
 
+  const selectedModelSpec =
+    endpointOption.spec && Array.isArray(appConfig?.modelSpecs?.list)
+      ? appConfig.modelSpecs.list.find((modelSpec) => modelSpec.name === endpointOption.spec)
+      : null;
+
+  if (
+    primaryAgent &&
+    isEphemeralAgentId(primaryAgent.id) &&
+    selectedModelSpec &&
+    Object.hasOwn(selectedModelSpec, 'skills')
+  ) {
+    if (selectedModelSpec.skills === true) {
+      primaryAgent.skills_enabled = true;
+      delete primaryAgent.skills;
+    } else if (selectedModelSpec.skills === false) {
+      primaryAgent.skills_enabled = false;
+      primaryAgent.skills = [];
+    } else if (Array.isArray(selectedModelSpec.skills)) {
+      const resolvedSkillIds = await resolveModelSpecSkillIds({
+        names: selectedModelSpec.skills,
+        accessibleSkillIds,
+        getSkillByName: db.getSkillByName,
+      });
+      primaryAgent.skills_enabled = true;
+      primaryAgent.skills = resolvedSkillIds.map((id) => id.toString());
+    }
+  }
+
   const primaryScopedSkillIds = resolveAgentScopedSkillIds({
     agent: primaryAgent,
     accessibleSkillIds,
@@ -323,6 +405,7 @@ const initializeClient = async ({ req, res, signal, endpointOption }) => {
       accessibleSkillIds: primaryScopedSkillIds,
       skillAuthoringAvailable: primarySkillAuthoringAvailable,
       codeEnvAvailable,
+      memoryAvailable,
       skillStates,
       defaultActiveOnShare,
       manualSkills,
@@ -338,11 +421,16 @@ const initializeClient = async ({ req, res, signal, endpointOption }) => {
       getToolFilesByIds: db.getToolFilesByIds,
       getCodeGeneratedFiles: db.getCodeGeneratedFiles,
       filterFilesByAgentAccess,
-      listSkillsByAccess: db.listSkillsByAccess,
-      listAlwaysApplySkills: db.listAlwaysApplySkills,
-      getSkillByName: db.getSkillByName,
+      listSkillsByAccess: skillDbMethods.listSkillsByAccess,
+      listAlwaysApplySkills: skillDbMethods.listAlwaysApplySkills,
+      getSkillByName: skillDbMethods.getSkillByName,
     },
   );
+
+  /** Price emitted usage with the primary agent's resolved endpoint config so
+   *  custom-endpoint agents reflect configured rates (mirrors the AgentClient
+   *  spending path, which reads the same config). */
+  usageCost.endpointTokenConfig = primaryConfig.endpointTokenConfig;
 
   logger.debug(
     `[initializeClient] Storing tool context for ${primaryConfig.id}: ${primaryConfig.toolDefinitions?.length ?? 0} tools, registry size: ${primaryConfig.toolRegistry?.size ?? '0'}`,
@@ -393,6 +481,7 @@ const initializeClient = async ({ req, res, signal, endpointOption }) => {
       skillStates,
       defaultActiveOnShare,
       codeEnvAvailable,
+      memoryAvailable,
     },
     {
       getAgent: db.getAgent,
@@ -409,9 +498,9 @@ const initializeClient = async ({ req, res, signal, endpointOption }) => {
         getToolFilesByIds: db.getToolFilesByIds,
         getCodeGeneratedFiles: db.getCodeGeneratedFiles,
         filterFilesByAgentAccess,
-        listSkillsByAccess: db.listSkillsByAccess,
-        listAlwaysApplySkills: db.listAlwaysApplySkills,
-        getSkillByName: db.getSkillByName,
+        listSkillsByAccess: skillDbMethods.listSkillsByAccess,
+        listAlwaysApplySkills: skillDbMethods.listAlwaysApplySkills,
+        getSkillByName: skillDbMethods.getSkillByName,
       },
       // The callback fires during BFS, before the helper prunes agents
       // whose edges end up filtered. Don't populate `agentConfigs` here —
@@ -456,7 +545,15 @@ const initializeClient = async ({ req, res, signal, endpointOption }) => {
     parentMessageId,
     allowedProviders,
     primaryAgentId: primaryConfig.id,
+    accessibleSkillIds,
+    editableSkillIds,
+    skillsCapabilityEnabled,
+    ephemeralSkillsToggle,
+    skillCreateAllowed,
+    skillStates,
+    defaultActiveOnShare,
     codeEnvAvailable,
+    memoryAvailable,
   });
 
   if (updatedMCPAuthMap) {
@@ -595,6 +692,7 @@ const initializeClient = async ({ req, res, signal, endpointOption }) => {
            *  false`, so `bash_tool` / `read_file` sandbox fallback are
            *  silently gated off even though the seed walk found it. */
           codeEnvAvailable,
+          memoryAvailable,
           skillStates,
           defaultActiveOnShare,
         },
@@ -609,9 +707,9 @@ const initializeClient = async ({ req, res, signal, endpointOption }) => {
           getToolFilesByIds: db.getToolFilesByIds,
           getCodeGeneratedFiles: db.getCodeGeneratedFiles,
           filterFilesByAgentAccess,
-          listSkillsByAccess: db.listSkillsByAccess,
-          listAlwaysApplySkills: db.listAlwaysApplySkills,
-          getSkillByName: db.getSkillByName,
+          listSkillsByAccess: skillDbMethods.listSkillsByAccess,
+          listAlwaysApplySkills: skillDbMethods.listAlwaysApplySkills,
+          getSkillByName: skillDbMethods.getSkillByName,
         },
       );
       agentConfigs.set(agentId, config);
@@ -833,6 +931,28 @@ const initializeClient = async ({ req, res, signal, endpointOption }) => {
         })
     : undefined;
 
+  /** Per-agent resolved endpoint token config, keyed by agent id. Built from
+   *  `agentToolContexts` (the one map holding every agent, including pure
+   *  subagents pruned from `agentConfigs`) so usage billed/emitted for a
+   *  connected or subagent on a different custom endpoint is priced with THAT
+   *  agent's configured rates instead of the primary's. Every known agent is
+   *  recorded — even with an `undefined` config — so the resolver can tell a
+   *  known non-custom agent (built-in pricing) from an untagged/unknown one
+   *  (primary fallback).
+   *  @type {Map<string, import('@librechat/api').EndpointTokenConfig | undefined>} */
+  const endpointTokenConfigByAgentId = new Map();
+  for (const [agentId, ctx] of agentToolContexts) {
+    endpointTokenConfigByAgentId.set(agentId, ctx?.endpointTokenConfig);
+  }
+  /** Price emitted usage per producing agent too, so the streamed/persisted
+   *  `metadata.usage.cost` matches the per-agent balance transaction. */
+  usageCost.resolveEndpointTokenConfig = (usage) =>
+    resolveAgentTokenConfig({
+      agentId: usage?.agentId,
+      byAgentId: endpointTokenConfigByAgentId,
+      fallback: usageCost.endpointTokenConfig,
+    });
+
   const client = new AgentClient({
     req,
     res,
@@ -856,6 +976,17 @@ const initializeClient = async ({ req, res, signal, endpointOption }) => {
     maxContextTokens: primaryConfig.maxContextTokens,
     endpoint: isEphemeralAgentId(primaryConfig.id) ? primaryConfig.endpoint : EModelEndpoint.agents,
     subagentAggregatorsByToolCallId,
+    /** Resolved endpoint token/pricing config so spending and cost reflect
+     *  configured rates for custom-endpoint agents instead of defaults. */
+    endpointTokenConfig: primaryConfig.endpointTokenConfig,
+    /** Per-agent override of the above for multi-endpoint graphs (connected
+     *  agents + subagents); falls back to the primary config when an agent
+     *  isn't present or has no configured rates. */
+    endpointTokenConfigByAgentId,
+    /** Capture sinks the handlers fill during the run; `sendCompletion` reads
+     *  them to persist the breakdown + usage rollup on the response message. */
+    contextUsageSink,
+    usageEmitSink,
   });
 
   if (streamId) {

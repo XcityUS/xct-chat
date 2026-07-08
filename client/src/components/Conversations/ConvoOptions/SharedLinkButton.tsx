@@ -2,6 +2,12 @@ import { useState, useRef } from 'react';
 import { Trans } from 'react-i18next';
 import { QrCode, RotateCw, Trash2 } from 'lucide-react';
 import {
+  PermissionTypes,
+  Permissions,
+  PermissionBits,
+  ResourceType,
+} from 'librechat-data-provider';
+import {
   Label,
   Button,
   Spinner,
@@ -13,19 +19,13 @@ import {
   useToastContext,
   OGDialogContent,
 } from '@librechat/client';
-import {
-  PermissionTypes,
-  Permissions,
-  PermissionBits,
-  ResourceType,
-} from 'librechat-data-provider';
 import type { TSharedLinkGetResponse } from 'librechat-data-provider';
-import GenericGrantAccessDialog from '~/components/Sharing/GenericGrantAccessDialog';
 import {
   useCreateSharedLinkMutation,
   useUpdateSharedLinkMutation,
   useDeleteSharedLinkMutation,
 } from '~/data-provider';
+import GenericGrantAccessDialog from '~/components/Sharing/GenericGrantAccessDialog';
 import { useHasAccess, useResourcePermissions, useLocalize } from '~/hooks';
 import { NotificationSeverity } from '~/common';
 import { buildShareLinkUrl } from '~/utils';
@@ -37,6 +37,7 @@ export default function SharedLinkButton({
   showQR,
   setShowQR,
   setSharedLink,
+  snapshotFiles,
 }: {
   share: TSharedLinkGetResponse | undefined;
   conversationId: string;
@@ -44,6 +45,7 @@ export default function SharedLinkButton({
   showQR: boolean;
   setShowQR: (showQR: boolean) => void;
   setSharedLink: (sharedLink: string) => void;
+  snapshotFiles?: boolean;
 }) {
   const localize = useLocalize();
   const { showToast } = useToastContext();
@@ -99,7 +101,7 @@ export default function SharedLinkButton({
     if (!shareId) {
       return;
     }
-    const updateShare = await mutateAsync({ shareId, targetMessageId });
+    const updateShare = await mutateAsync({ shareId, targetMessageId, snapshotFiles });
     const newLink = generateShareLink(updateShare.shareId);
     setSharedLink(newLink);
     setAnnouncement(localize('com_ui_link_refreshed'));
@@ -109,7 +111,7 @@ export default function SharedLinkButton({
   };
 
   const createShareLink = async () => {
-    const share = await mutate({ conversationId, targetMessageId });
+    const share = await mutate({ conversationId, targetMessageId, snapshotFiles });
     const newLink = generateShareLink(share.shareId);
     setSharedLink(newLink);
   };
@@ -220,7 +222,7 @@ export default function SharedLinkButton({
               <GenericGrantAccessDialog
                 resourceType={ResourceType.SHARED_LINK}
                 resourceDbId={share?._id}
-                resourceName={share?.shareId}
+                resourceName={share?.shareId ?? undefined}
               >
                 <TooltipAnchor
                   description={localize('com_ui_shared_link_manage_access')}

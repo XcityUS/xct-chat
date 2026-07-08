@@ -1,6 +1,11 @@
 const mongoose = require('mongoose');
 const { isEnabled } = require('@librechat/api');
-const { getTransactionSupport, logger } = require('@librechat/data-schemas');
+const {
+  getTransactionSupport,
+  tenantStorage,
+  getTenantId,
+  logger,
+} = require('@librechat/data-schemas');
 const { ResourceType, PrincipalType, PrincipalModel } = require('librechat-data-provider');
 const {
   entraIdPrincipalFeatureEnabled,
@@ -25,6 +30,22 @@ const validateResourceType = (resourceType) => {
   if (!validTypes.includes(resourceType)) {
     throw new Error(`Invalid resourceType: ${resourceType}. Valid types: ${validTypes.join(', ')}`);
   }
+};
+
+const ensureLocalUserPrincipalExists = async (principalId) => {
+  const user = await db.findUser({ _id: principalId }, '_id');
+  if (!user) {
+    throw new Error('User principal not found');
+  }
+  return user._id.toString();
+};
+
+const ensureLocalGroupPrincipalExists = async (principalId) => {
+  const group = await db.findGroupById(principalId, { _id: 1 });
+  if (!group) {
+    throw new Error('Group principal not found');
+  }
+  return group._id.toString();
 };
 
 /**
@@ -300,8 +321,8 @@ const ensurePrincipalExists = async function (principal) {
     return null;
   }
 
-  if (principal.id) {
-    return principal.id;
+  if (principal.type === PrincipalType.USER && principal.id) {
+    return await ensureLocalUserPrincipalExists(principal.id);
   }
 
   if (principal.type === PrincipalType.USER && principal.source === 'entra') {
@@ -364,6 +385,10 @@ const ensurePrincipalExists = async function (principal) {
 const ensureGroupPrincipalExists = async function (principal, authContext = null) {
   if (principal.type !== PrincipalType.GROUP) {
     throw new Error(`Invalid principal type: ${principal.type}. Expected '${PrincipalType.GROUP}'`);
+  }
+
+  if (principal.id && principal.source !== 'entra') {
+    return await ensureLocalGroupPrincipalExists(principal.id);
   }
 
   if (principal.source === 'entra') {
@@ -481,6 +506,21 @@ const ensureGroupPrincipalExists = async function (principal, authContext = null
  * @returns {Promise<void>}
  */
 const syncUserEntraGroupMemberships = async (user, accessToken, session = null) => {
+  const tenantId = user?.tenantId ? String(user.tenantId) : undefined;
+  if (!tenantId || getTenantId() != null) {
+    return performEntraGroupMembershipSync(user, accessToken, session);
+  }
+  /**
+   * The OAuth callback runs before `tenantContextMiddleware`, so establish the
+   * user's tenant context here: group queries, created groups, and principal
+   * cache invalidation are then scoped exactly like authenticated reads.
+   */
+  return tenantStorage.run({ tenantId, userId: user._id?.toString() }, async () =>
+    performEntraGroupMembershipSync(user, accessToken, session),
+  );
+};
+
+const performEntraGroupMembershipSync = async (user, accessToken, session = null) => {
   try {
     if (!entraIdPrincipalFeatureEnabled(user) || !accessToken || !user.idOnTheSource) {
       return;

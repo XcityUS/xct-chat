@@ -11,7 +11,7 @@ jest.mock('@librechat/agents', () => ({
     parameters: {
       type: 'object',
       properties: {
-        file_path: {
+        path: {
           type: 'string',
           description: 'For skill files: "{skillName}/{path}".',
         },
@@ -33,7 +33,8 @@ jest.mock('@librechat/agents', () => ({
 }));
 
 import { Providers } from '@librechat/agents';
-import { EModelEndpoint, Tools } from 'librechat-data-provider';
+import { EModelEndpoint, EToolResources, Tools } from 'librechat-data-provider';
+import type { IMongoFile } from '@librechat/data-schemas';
 import type { Agent } from 'librechat-data-provider';
 import type { ServerRequest, InitializeResultBase, EndpointTokenConfig } from '~/types';
 import type { InitializeAgentDbMethods } from '../initialize';
@@ -243,6 +244,13 @@ function countWebSearchDefinitions(toolDefinitions: Array<{ name: string }> | un
   );
 }
 
+function countUrlContextTools(tools: unknown[] | undefined): number {
+  return (
+    tools?.filter((tool) => tool != null && typeof tool === 'object' && 'urlContext' in tool)
+      .length ?? 0
+  );
+}
+
 describe('initializeAgent — custom provider token lookup', () => {
   const CUSTOM_PROVIDER = 'EduGPT';
 
@@ -337,6 +345,29 @@ describe('initializeAgent — provider web_search precedence', () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });
+
+  async function initializeGoogleMixedToolAgent(model: string, provider = Providers.GOOGLE) {
+    const { agent, req, res, loadTools, db } = createMocks({
+      provider,
+      model,
+      providerTools: [nativeGoogleSearchTool],
+      loadedToolDefinitions: [mcpToolDefinition],
+    });
+    agent.tools = ['mcp_lookup'];
+
+    return initializeAgent(
+      {
+        req,
+        res,
+        agent,
+        loadTools,
+        endpointOption: { endpoint: EModelEndpoint.agents },
+        allowedProviders: new Set([provider]),
+        isInitialAgent: true,
+      },
+      db,
+    );
+  }
 
   it('keeps Anthropic native web_search when LibreChat search is not selected', async () => {
     const { agent, req, res, loadTools, db } = createMocks({
@@ -438,31 +469,126 @@ describe('initializeAgent — provider web_search precedence', () => {
     expect(result.tools).toEqual([nativeGoogleSearchTool]);
     expect(countGoogleSearchTools(result.tools)).toBe(1);
     expect(result.toolDefinitions).toContain(mcpToolDefinition);
+    expect(result.model_parameters).toEqual(
+      expect.objectContaining({
+        includeServerSideToolInvocations: true,
+      }),
+    );
   });
 
-  it('rejects Google native search with external tools for unsupported Gemini models', async () => {
+  it('includes the mixed-tool flag for Vertex AI native search with external tools', async () => {
     const { agent, req, res, loadTools, db } = createMocks({
-      provider: Providers.GOOGLE,
-      model: 'gemini-2.5-flash',
+      provider: Providers.VERTEXAI,
+      model: 'gemini-3.5-flash',
       providerTools: [nativeGoogleSearchTool],
       loadedToolDefinitions: [mcpToolDefinition],
     });
     agent.tools = ['mcp_lookup'];
 
-    await expect(
-      initializeAgent(
-        {
-          req,
-          res,
-          agent,
-          loadTools,
-          endpointOption: { endpoint: EModelEndpoint.agents },
-          allowedProviders: new Set([Providers.GOOGLE]),
-          isInitialAgent: true,
-        },
-        db,
-      ),
-    ).rejects.toThrow(/google_tool_conflict/);
+    const result = await initializeAgent(
+      {
+        req,
+        res,
+        agent,
+        loadTools,
+        endpointOption: { endpoint: EModelEndpoint.agents },
+        allowedProviders: new Set([Providers.VERTEXAI]),
+        isInitialAgent: true,
+      },
+      db,
+    );
+
+    expect(result.tools).toEqual([nativeGoogleSearchTool]);
+    expect(result.toolDefinitions).toContain(mcpToolDefinition);
+    expect(result.model_parameters).toEqual(
+      expect.objectContaining({
+        includeServerSideToolInvocations: true,
+      }),
+    );
+  });
+
+  it.each([
+    'gemini-3-flash-preview',
+    'gemini-3-pro-preview',
+    'gemini-3.1-pro-preview',
+    'gemini-3.1-pro-preview-customtools',
+    'gemini-3.1-flash-lite',
+    'gemini-3.1-flash-lite-preview',
+    'gemini-3.5-flash',
+    'google/gemini-3.5-flash-latest',
+    'models/gemini-3.10-pro-preview',
+    'gemini-4-pro-preview',
+  ])('allows Google mixed tools for supported Gemini text model %s', async (model) => {
+    const result = await initializeGoogleMixedToolAgent(model);
+
+    expect(result.tools).toEqual([nativeGoogleSearchTool]);
+    expect(result.toolDefinitions).toContain(mcpToolDefinition);
+    expect(result.model_parameters).toEqual(
+      expect.objectContaining({
+        includeServerSideToolInvocations: true,
+      }),
+    );
+  });
+
+  it('sets the mixed-tool flag when the skill catalog adds the external tool', async () => {
+    const { agent, req, res, loadTools, db } = createMocks({
+      provider: Providers.GOOGLE,
+      model: 'gemini-3.5-flash',
+      providerTools: [nativeGoogleSearchTool],
+    });
+    const { Types } = await import('mongoose');
+    const skillId = new Types.ObjectId();
+    const author = {
+      toString: () => req.user?.id,
+    } as unknown as import('mongoose').Types.ObjectId;
+
+    const result = await initializeAgent(
+      {
+        req,
+        res,
+        agent,
+        loadTools,
+        endpointOption: { endpoint: EModelEndpoint.agents },
+        allowedProviders: new Set([Providers.GOOGLE]),
+        isInitialAgent: true,
+        accessibleSkillIds: [skillId],
+      },
+      {
+        ...db,
+        listSkillsByAccess: jest.fn().mockResolvedValue({
+          skills: [
+            {
+              _id: skillId,
+              name: 'research-helper',
+              description: 'Research current information.',
+              author,
+            },
+          ],
+          has_more: false,
+          after: null,
+        }),
+      },
+    );
+
+    expect(result.tools).toEqual([nativeGoogleSearchTool]);
+    expect(result.toolDefinitions?.map((toolDefinition) => toolDefinition.name)).toContain('skill');
+    expect(result.model_parameters).toEqual(
+      expect.objectContaining({
+        includeServerSideToolInvocations: true,
+      }),
+    );
+  });
+
+  it.each([
+    'gemini-2.5-flash',
+    'gemini-3',
+    'gemini-3.1',
+    'gemini-3-pro-image-preview',
+    'gemini-3.1-flash-image',
+    'gemini-3.5-flash-live',
+    'gemini-4-pro-tts',
+  ])('rejects Google mixed tools for unsupported Gemini model %s', async (model) => {
+    await expect(initializeGoogleMixedToolAgent(model)).rejects.toThrow(/google_tool_conflict/);
   });
 
   it('prefers LibreChat web_search when Google native search is also enabled', async () => {
@@ -516,6 +642,62 @@ describe('initializeAgent — provider web_search precedence', () => {
     expect(countNamedWebSearchTools(result.tools)).toBe(1);
     expect(countWebSearchDefinitions(result.toolDefinitions)).toBe(1);
   });
+
+  it('treats the Google urlContext tool as a native provider tool', async () => {
+    const { agent, req, res, loadTools, db } = createMocks({
+      provider: Providers.GOOGLE,
+      model: 'gemini-1.5-flash',
+      providerTools: [{ urlContext: {} }],
+    });
+
+    const result = await initializeAgent(
+      {
+        req,
+        res,
+        agent,
+        loadTools,
+        endpointOption: { endpoint: EModelEndpoint.agents },
+        allowedProviders: new Set([Providers.GOOGLE]),
+        isInitialAgent: true,
+      },
+      db,
+    );
+
+    expect(result.tools).toEqual([{ urlContext: {} }]);
+    expect(countUrlContextTools(result.tools)).toBe(1);
+  });
+
+  it('preserves the Google urlContext tool when LibreChat web_search is also enabled', async () => {
+    /**
+     * url_context is unrelated to web search, so the LibreChat web_search conflict
+     * resolver must not strip the native urlContext tool. The combination of a
+     * provider tool with an agent tool requires a combination-capable Gemini model.
+     */
+    const { agent, req, res, loadTools, db } = createMocks({
+      provider: Providers.GOOGLE,
+      model: 'gemini-3.5-flash',
+      providerTools: [{ urlContext: {} }],
+      loadedToolDefinitions: [libreChatWebSearchDefinition],
+    });
+    agent.tools = [Tools.web_search];
+
+    const result = await initializeAgent(
+      {
+        req,
+        res,
+        agent,
+        loadTools,
+        endpointOption: { endpoint: EModelEndpoint.agents },
+        allowedProviders: new Set([Providers.GOOGLE]),
+        isInitialAgent: true,
+      },
+      db,
+    );
+
+    expect(result.tools).toEqual([{ urlContext: {} }]);
+    expect(countUrlContextTools(result.tools)).toBe(1);
+    expect(countWebSearchDefinitions(result.toolDefinitions)).toBe(1);
+  });
 });
 
 describe('initializeAgent — stable and dynamic instruction fields', () => {
@@ -543,6 +725,31 @@ describe('initializeAgent — stable and dynamic instruction fields', () => {
 
     expect(result.instructions).toBeUndefined();
     expect(result.additional_instructions).toBe('Conversation opened at 2023-12-31T23:59:58.000Z');
+  });
+
+  it('resolves temporal special vars in the request timezone', async () => {
+    const { agent, req, res, loadTools, db } = createMocks();
+    agent.instructions = 'It is currently {{current_datetime}}.';
+    req.conversationCreatedAt = '2024-01-15T18:30:00.000Z';
+    req.body = { timezone: 'America/New_York' };
+
+    const result = await initializeAgent(
+      {
+        req,
+        res,
+        agent,
+        loadTools,
+        endpointOption: { endpoint: EModelEndpoint.agents },
+        allowedProviders: new Set([Providers.OPENAI]),
+        isInitialAgent: true,
+      },
+      db,
+    );
+
+    expect(result.instructions).toBeUndefined();
+    expect(result.additional_instructions).toBe(
+      'It is currently 2024-01-15 13:30:00 -05:00 (Monday).',
+    );
   });
 
   it('keeps non-temporal special vars in stable instructions', async () => {
@@ -631,6 +838,53 @@ describe('initializeAgent — attachment scoping', () => {
     expect(result.attachments).toEqual([agentContextFile, requestFile]);
     expect(result.requestAttachments).toEqual([requestFile]);
     expect(result.agentContextAttachments).toEqual([agentContextFile]);
+  });
+
+  it('owner-scopes request file usage updates while preserving trusted tool files', async () => {
+    const requestFile = { file_id: 'request-file', filename: 'request.txt' } as IMongoFile;
+    const toolFile = { file_id: 'tool-file', filename: 'tool.txt' } as IMongoFile;
+    const { agent, req, res, loadTools, db } = createMocks();
+
+    agent.tools = [EToolResources.file_search];
+    mockExtractLibreChatParams.mockReturnValueOnce({
+      resendFiles: true,
+      maxContextTokens: undefined,
+      modelOptions: { model: agent.model },
+    });
+    (db.getConvoFiles as jest.Mock).mockResolvedValueOnce([toolFile.file_id]);
+    (db.getToolFilesByIds as jest.Mock).mockResolvedValueOnce([toolFile]);
+    (db.updateFilesUsage as jest.Mock)
+      .mockResolvedValueOnce([requestFile])
+      .mockResolvedValueOnce([toolFile]);
+
+    await initializeAgent(
+      {
+        req,
+        res,
+        agent,
+        loadTools,
+        requestFiles: [requestFile],
+        conversationId: 'conversation-1',
+        endpointOption: { endpoint: EModelEndpoint.agents },
+        allowedProviders: new Set([Providers.OPENAI]),
+        isInitialAgent: true,
+      },
+      db,
+    );
+
+    expect(db.getToolFilesByIds).toHaveBeenCalledWith(
+      [toolFile.file_id],
+      new Set([EToolResources.file_search]),
+      { userId: 'user-1', tenantId: undefined },
+    );
+    expect(db.updateFilesUsage).toHaveBeenNthCalledWith(1, [requestFile], undefined, {
+      user: 'user-1',
+      tenantId: undefined,
+    });
+    expect(db.updateFilesUsage).toHaveBeenNthCalledWith(2, [toolFile], undefined, {
+      user: 'user-1',
+      tenantId: undefined,
+    });
   });
 });
 
@@ -1681,6 +1935,9 @@ describe('initializeAgent — execute_code capability expansion', () => {
     ).resolves.toEqual(
       expect.objectContaining({
         tools: [{ googleSearch: {} }],
+        model_parameters: expect.objectContaining({
+          includeServerSideToolInvocations: true,
+        }),
         toolDefinitions: expect.arrayContaining([
           expect.objectContaining({ name: 'bash_tool' }),
           expect.objectContaining({ name: 'read_file' }),
@@ -1722,6 +1979,9 @@ describe('initializeAgent — execute_code capability expansion', () => {
     ).resolves.toEqual(
       expect.objectContaining({
         tools: [structuredTool, providerTool],
+        model_parameters: expect.objectContaining({
+          includeServerSideToolInvocations: true,
+        }),
       }),
     );
   });
@@ -1804,13 +2064,17 @@ describe('initializeAgent — code-generated file thread filter (regression)', (
     );
 
     expect(getCodeGeneratedFiles).toHaveBeenCalledTimes(1);
-    expect(getCodeGeneratedFiles).toHaveBeenCalledWith('conv-1', [
-      'file-pptx-skill',
-      'file-output-csv',
-    ]);
+    expect(getCodeGeneratedFiles).toHaveBeenCalledWith(
+      'conv-1',
+      ['file-pptx-skill', 'file-output-csv'],
+      { userId: 'user-1', tenantId: undefined },
+    );
     /* Both functions now share the same primary anchor — symmetric
      * design that closes the sibling-branch hole. */
-    expect(getUserCodeFiles).toHaveBeenCalledWith(['file-pptx-skill', 'file-output-csv']);
+    expect(getUserCodeFiles).toHaveBeenCalledWith(['file-pptx-skill', 'file-output-csv'], {
+      userId: 'user-1',
+      tenantId: undefined,
+    });
   });
 
   it('selects messages.attachments alongside messages.files (regression)', async () => {
@@ -1898,10 +2162,64 @@ describe('initializeAgent — code-generated file thread filter (regression)', (
       { ...db, getMessages, getCodeGeneratedFiles, getUserCodeFiles },
     );
 
-    expect(getCodeGeneratedFiles).toHaveBeenCalledWith('conv-1', []);
+    expect(getCodeGeneratedFiles).toHaveBeenCalledWith('conv-1', [], {
+      userId: 'user-1',
+      tenantId: undefined,
+    });
     /* `getUserCodeFiles` is gated on a non-empty array at the call site,
      * so it shouldn't be invoked at all. `getCodeGeneratedFiles`'s own
      * empty-guard is exercised by data-schemas tests. */
     expect(getUserCodeFiles).not.toHaveBeenCalled();
+  });
+});
+
+describe('initializeAgent — run-scoped MCP tool definitions', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('carries mcpAvailableTools from the loadTools result onto the initialized agent', async () => {
+    /** Regression guard for the request-scoped MCP/PTC handoff: dropping this
+     *  field at the destructure boundary forces per-call reinitialization
+     *  downstream and can storm the MCP circuit breaker. */
+    const { agent, req, res, loadTools, db } = createMocks();
+    const mcpTool = 'list_tables_mcp_ClickHouse';
+    const mcpAvailableTools = {
+      ClickHouse: {
+        [mcpTool]: {
+          type: 'function' as const,
+          function: {
+            name: mcpTool,
+            description: 'List tables',
+            parameters: { type: 'object' as const, properties: {} },
+          },
+        },
+      },
+    };
+    loadTools.mockResolvedValue({
+      tools: [],
+      toolContextMap: {},
+      dynamicToolContextMap: {},
+      userMCPAuthMap: undefined,
+      toolRegistry: undefined,
+      toolDefinitions: [],
+      hasDeferredTools: false,
+      mcpAvailableTools,
+    });
+
+    const result = await initializeAgent(
+      {
+        req,
+        res,
+        agent,
+        loadTools,
+        endpointOption: { endpoint: EModelEndpoint.agents },
+        allowedProviders: new Set([Providers.OPENAI]),
+        isInitialAgent: true,
+      },
+      db,
+    );
+
+    expect(result.mcpAvailableTools).toEqual(mcpAvailableTools);
   });
 });

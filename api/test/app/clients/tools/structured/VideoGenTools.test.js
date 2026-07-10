@@ -48,22 +48,20 @@ describe('VideoGenTool', () => {
     await expect(tool._call({})).rejects.toThrow(/prompt/);
   });
 
-  it('builds a payload with the model, prompt, and provided optionals', () => {
+  it('builds an OpenAI-compatible payload with the model, prompt, and provided optionals', () => {
     const tool = makeTool();
     const payload = tool.buildPayload({
       prompt: 'a cat surfing',
-      duration: 5,
-      aspect_ratio: '16:9',
-      resolution: '1080p',
-      image_url: 'https://img.test/a.png',
+      seconds: 5,
+      size: '1280x720',
+      input_reference: 'https://img.test/a.png',
     });
     expect(payload).toEqual({
       model: 'dreamina-seedance-2-0-260128',
       prompt: 'a cat surfing',
-      duration: 5,
-      aspect_ratio: '16:9',
-      resolution: '1080p',
-      image_url: 'https://img.test/a.png',
+      seconds: 5,
+      size: '1280x720',
+      input_reference: 'https://img.test/a.png',
     });
   });
 
@@ -102,6 +100,19 @@ describe('VideoGenTool', () => {
 
     expect(getSpy).toHaveBeenCalledTimes(2);
     expect(artifact.content[0].video_url.url).toBe('https://cdn.test/done.mp4');
+  });
+
+  it('resolves the LiteLLM-normalized output_url from a completed poll (BytePlus/seedance)', async () => {
+    postSpy.mockResolvedValueOnce({ data: { id: 'cgt-123', status: 'queued' } });
+    getSpy
+      .mockResolvedValueOnce({ data: { id: 'cgt-123', status: 'in_progress' } })
+      .mockResolvedValueOnce({
+        data: { id: 'cgt-123', status: 'completed', output_url: 'https://ark.test/out.mp4' },
+      });
+
+    const tool = makeTool();
+    const [, artifact] = await tool._call({ prompt: 'seedance clip' });
+    expect(artifact.content[0].video_url.url).toBe('https://ark.test/out.mp4');
   });
 
   it('resolves a base64 data url from a synchronous b64_json response', async () => {

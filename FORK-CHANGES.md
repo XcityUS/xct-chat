@@ -98,6 +98,17 @@ Env (absent = tool disabled; upstream behavior unchanged): `VIDEO_GEN_API_KEY`
 (required to enable), `VIDEO_GEN_BASEURL`, `VIDEO_GEN_MODEL`, optional
 `VIDEO_GEN_CREATE_PATH`, `VIDEO_GEN_POLL_INTERVAL_MS`, `VIDEO_GEN_MAX_WAIT_MS`.
 
+**Per-user billing** (`handleTools.js`): the image (`image_gen_oai`) and video
+(`video_gen`) tools resolve the signed-in user's own gateway vkey via
+`resolveUserVKey` (the same XCT key exchange the chat endpoint uses, FORK-CHANGES
+§1) and use it as the tool's API key, so in-chat media generation counts against
+the user's per-plan budget instead of the shared `${LITELLM_API_KEY}`. Gated by
+`XCT_KEY_EXCHANGE_ENABLED` and fail-safe: a null exchange falls back to the
+shared key. Requires exporting `resolveUserVKey` / `xctKeyExchangeEnabled` from
+`@librechat/api` (`packages/api/src/endpoints/custom/index.ts` barrels
+`xctKeyExchange`). `video_gen` moved from `toolConstructors` to
+`customConstructors` so the resolved vkey can be injected per request.
+
 ## Pending (contract ready, needs live-gateway verification)
 
 - **Per-request `metadata.xct_agent_id` injection** (P3 agent-dimension

@@ -139,4 +139,12 @@ describe('VideoGenTool', () => {
     const [message] = await tool._call({ prompt: 'x' });
     expect(message).toMatch(/video service may be unavailable/i);
   });
+
+  it('sends the provided API key as the Bearer credential (per-user vkey billing)', async () => {
+    postSpy.mockResolvedValueOnce({ data: { output_url: 'https://cdn.test/x.mp4' } });
+    const tool = makeTool({ VIDEO_GEN_API_KEY: 'user-vkey-abc123' });
+    await tool._call({ prompt: 'bill me' });
+    const postConfig = postSpy.mock.calls[0][2];
+    expect(postConfig.headers.Authorization).toBe('Bearer user-vkey-abc123');
+  });
 });

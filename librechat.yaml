@@ -12,9 +12,12 @@ version: 1.3.12
 #              IMAGE_GEN_OAI_* env vars (see railway.env.template) which point
 #              at https://tokenhub.xcity.one/v1. Enabled via the `tools`
 #              agent capability below — nothing to add in this file.          [done]
-#   - Video/ : no native LibreChat tool; exposed as an Agent Action (OpenAPI)
-#     Audio    against the deployed fal gateway (/generate/video,
-#              /generate/audio) or LiteLLM /videos. Allow its domain under
+#   - Video  : native fork tool "video_gen" (FORK-CHANGES.md §3), configured by
+#              the VIDEO_GEN_* env vars pointing at the LiteLLM gateway video
+#              API. Auto-enabled for agents when VIDEO_GEN_API_KEY is set;
+#              enabled via the `tools` agent capability below.                [done]
+#   - Audio  : no native LibreChat tool; expose the fal gateway /generate/audio
+#              as an Agent Action and allow its host under
 #              `actions.allowedDomains` once the gateway URL is known.        [pending: needs gateway deploy]
 
 endpoints:

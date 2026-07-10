@@ -155,6 +155,22 @@ export const isImageAttachment = (attachment: TAttachment): boolean => {
   );
 };
 
+const videoExtRegex = /\.(mp4|webm|mov|m4v|ogg)$/i;
+
+/**
+ * An attachment renders inline as a video player when its filename carries a
+ * known video extension and it has a resolvable filepath. Mirrors
+ * `isImageAttachment` but without the width/height requirement (video reserves
+ * its own layout via the `<video>` element's intrinsic aspect ratio).
+ */
+export const isVideoAttachment = (attachment: TAttachment): boolean => {
+  if (!attachment.filename) {
+    return false;
+  }
+  const { filepath = null } = attachment as TFile & TAttachmentMetadata;
+  return videoExtRegex.test(attachment.filename) && filepath != null;
+};
+
 /**
  * An attachment renders inline as text when the backend has populated a
  * non-empty `text` field on the underlying file record. Empty strings are

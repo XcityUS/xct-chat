@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const mime = require('mime');
+const fetch = require('node-fetch');
 const { v4 } = require('uuid');
 const {
   isUUID,
@@ -24,6 +25,7 @@ const {
   parseText,
   processAudioFile,
   getStorageMetadata,
+  getHttpsProxyAgent,
   sweepExpiredFiles: sweepExpiredFilesWithDeps,
   startExpiredFileSweep: startExpiredFileSweepWithDeps,
 } = require('@librechat/api');
@@ -1182,10 +1184,10 @@ async function retrieveAndProcessFile({
  */
 function base64ToBuffer(base64String) {
   try {
-    const typeMatch = base64String.match(/^data:([A-Za-z-+/]+);base64,/);
+    const typeMatch = base64String.match(/^data:([^;,]+);base64,/);
     const type = typeMatch ? typeMatch[1] : '';
 
-    const base64Data = base64String.replace(/^data:([A-Za-z-+/]+);base64,/, '');
+    const base64Data = base64String.replace(/^data:([^;,]+);base64,/, '');
 
     if (!base64Data) {
       throw new Error('Invalid base64 string');
@@ -1242,6 +1244,92 @@ async function saveBase64Image(
       width: image.width,
       ...(await getRetentionExpiry(req)),
       height: image.height,
+      tenantId: req.user.tenantId,
+    },
+    true,
+  );
+}
+
+/**
+ * Persists a generated video to the configured file storage and creates its
+ * file record. Accepts either a base64 `data:` URL (inline payload) or a
+ * remote `http(s)` URL (downloaded once here).
+ *
+ * @param {string} url - `data:` URL or remote video URL.
+ * @param {Object} params
+ * @param {ServerRequest} params.req
+ * @param {string} [params.file_id]
+ * @param {string} [params.filename]
+ * @param {FileContext} [params.context]
+ * @returns {Promise<MongoFile>}
+ */
+async function saveVideoFromUrl(url, { req, file_id: _file_id, filename: _filename, context }) {
+  const appConfig = req.config;
+  const file_id = _file_id ?? v4();
+  const maxBytes = Number(process.env.VIDEO_GEN_MAX_BYTES) || 200 * 1024 * 1024;
+  const fetchTimeoutMs = Number(process.env.VIDEO_GEN_FETCH_TIMEOUT_MS) || 120 * 1000;
+
+  let buffer;
+  let type;
+  if (url.startsWith('data:')) {
+    ({ buffer, type } = base64ToBuffer(url));
+  } else {
+    // Only http(s) — the URL originates from gateway output; reject other
+    // schemes (file:, ftp:, gopher:, …) to limit SSRF surface.
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new Error(`Refusing to download video from unsupported protocol: ${parsed.protocol}`);
+    }
+    const fetchOptions = { timeout: fetchTimeoutMs };
+    const agent = getHttpsProxyAgent(url);
+    if (agent) {
+      fetchOptions.agent = agent;
+    }
+    const response = await fetch(url, fetchOptions);
+    if (!response.ok) {
+      throw new Error(`Failed to download video (${response.status} ${response.statusText})`);
+    }
+    const contentLength = Number(response.headers.get('content-length'));
+    if (contentLength && contentLength > maxBytes) {
+      throw new Error(`Video exceeds the maximum allowed size (${contentLength} > ${maxBytes})`);
+    }
+    buffer = Buffer.from(await response.arrayBuffer());
+    type = response.headers.get('content-type');
+  }
+  if (buffer.length > maxBytes) {
+    throw new Error(`Video exceeds the maximum allowed size (${buffer.length} > ${maxBytes})`);
+  }
+  if (!type) {
+    type = 'video/mp4';
+  }
+
+  let filename = `${file_id}-${_filename ?? file_id}`;
+  if (!path.extname(filename)) {
+    const extension = mime.getExtension(type) || 'mp4';
+    filename += `.${extension}`;
+  }
+
+  const source = getFileStrategy(appConfig, { context });
+  const { saveBuffer } = getStrategyFunctions(source);
+  const filepath = await saveBuffer({
+    userId: req.user.id,
+    fileName: filename,
+    buffer,
+    tenantId: req.user.tenantId,
+  });
+  const storageMetadata = getStorageMetadata({ filepath, source });
+  return await db.createFile(
+    {
+      type,
+      source,
+      context,
+      file_id,
+      filepath,
+      ...storageMetadata,
+      filename,
+      user: req.user.id,
+      bytes: buffer.length,
+      ...(await getRetentionExpiry(req)),
       tenantId: req.user.tenantId,
     },
     true,
@@ -1330,6 +1418,7 @@ module.exports = {
   filterFile,
   processFileURL,
   saveBase64Image,
+  saveVideoFromUrl,
   processImageFile,
   uploadImageBuffer,
   sweepExpiredFiles,

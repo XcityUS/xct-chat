@@ -45,6 +45,19 @@
     ]
   },
   {
+    "name": "Video Generation",
+    "pluginKey": "video_gen",
+    "description": "Generate short videos from a text prompt (or animate a reference image) via the XCity gateway",
+    "icon": "assets/image_gen_oai.png",
+    "authConfig": [
+      {
+        "authField": "VIDEO_GEN_API_KEY",
+        "label": "Video Generation API Key",
+        "description": "API key for the video generation gateway (reuses the LiteLLM virtual key)"
+      }
+    ]
+  },
+  {
     "name": "Wolfram",
     "pluginKey": "wolfram",
     "description": "Access computation, math, curated knowledge & real-time data through Wolfram|Alpha and Wolfram Language.",

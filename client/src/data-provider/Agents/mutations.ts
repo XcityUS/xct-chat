@@ -179,6 +179,28 @@ export const useDuplicateAgentMutation = (
 };
 
 /**
+ * Hook for publishing an agent to the XCity gateway marketplace (XCT fork)
+ */
+export const usePublishAgentMutation = (
+  options?: t.PublishAgentMutationOptions,
+): UseMutationResult<t.PublishAgentResponse, Error, t.PublishAgentBody> => {
+  const queryClient = useQueryClient();
+
+  return useMutation<t.PublishAgentResponse, Error, t.PublishAgentBody>(
+    (params: t.PublishAgentBody) => dataService.publishAgent(params),
+    {
+      onMutate: options?.onMutate,
+      onError: options?.onError,
+      onSuccess: (data, variables, context) => {
+        queryClient.invalidateQueries([QueryKeys.agent, variables.agent_id]);
+        invalidateAgentMarketplaceQueries(queryClient);
+        return options?.onSuccess?.(data, variables, context);
+      },
+    },
+  );
+};
+
+/**
  * Hook for uploading an agent avatar
  */
 export const useUploadAgentAvatarMutation = (

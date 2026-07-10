@@ -8,7 +8,15 @@
  */
 
 jest.mock('axios');
+// litellmSource pulls resolveUserVKey from @librechat/api; mock it so the
+// real bundle (which builds an axios instance at import time, incompatible
+// with the module mock above) never loads.
+jest.mock('@librechat/api', () => ({
+  resolveUserVKey: jest.fn(),
+  xctKeyExchangeEnabled: jest.fn(),
+}));
 const axios = require('axios');
+const { resolveUserVKey, xctKeyExchangeEnabled } = require('@librechat/api');
 
 const ORIGINAL_ENV = { ...process.env };
 
@@ -33,12 +41,16 @@ const AGENT_DOC = {
 const { publishAgent } = require('./litellmSource');
 
 describe('litellmSource.publishAgent', () => {
+  const REQ = { user: { id: 'u1', name: 'Alice', openidId: 'sub-1', email: 'alice@x.com' } };
+
   beforeEach(() => {
     jest.clearAllMocks();
     process.env = { ...ORIGINAL_ENV };
     delete process.env.LITELLM_PUBLISH_ENABLED;
     process.env.LITELLM_BASEURL = 'https://tokenhub.test';
     process.env.LITELLM_API_KEY = 'sk-svc';
+    xctKeyExchangeEnabled.mockReturnValue(true);
+    resolveUserVKey.mockResolvedValue('sk-user');
   });
 
   afterAll(() => {
@@ -46,27 +58,38 @@ describe('litellmSource.publishAgent', () => {
   });
 
   it('is disabled by default (no gateway call)', async () => {
-    const result = await publishAgent(AGENT_DOC);
+    const result = await publishAgent(AGENT_DOC, { req: REQ });
     expect(result).toMatchObject({ published: false, reason: 'disabled' });
     expect(axios.post).not.toHaveBeenCalled();
   });
 
-  it('POSTs an agent card to /v1/agents when enabled', async () => {
+  it('requires the user vkey — the shared key must never own a publication', async () => {
     enablePublish();
-    axios.post.mockResolvedValue({ data: { agent_id: 'xct-translator' } });
+    resolveUserVKey.mockResolvedValue(null);
+    const result = await publishAgent(AGENT_DOC, { req: REQ });
+    expect(result).toMatchObject({ published: false, reason: 'no_user_key' });
+    expect(axios.post).not.toHaveBeenCalled();
+  });
 
-    const result = await publishAgent(AGENT_DOC);
+  it('POSTs a new agent card with the user vkey and author provider', async () => {
+    enablePublish();
+    axios.get.mockResolvedValue({ data: [] });
+    axios.post.mockResolvedValue({ data: { agent_id: 'uuid-new' } });
 
-    expect(result).toMatchObject({ published: true, agent_id: 'xct-translator' });
+    const result = await publishAgent(AGENT_DOC, { req: REQ });
+
+    expect(result).toMatchObject({ published: true, agent_id: 'uuid-new' });
     expect(axios.post).toHaveBeenCalledTimes(1);
 
     const [url, body, config] = axios.post.mock.calls[0];
     expect(url).toBe('https://tokenhub.test/v1/agents');
-    expect(config.headers.Authorization).toBe('Bearer sk-svc');
+    expect(config.headers.Authorization).toBe('Bearer sk-user');
     expect(body.agent_name).toBe('xct-agent_abc123');
+    expect(body.litellm_params).toEqual({ make_public: true });
     expect(body.agent_card_params).toMatchObject({
       name: '🌐 Translator',
       description: 'Translates anything.',
+      provider: { organization: 'Alice' },
     });
     // Resource composition rides along so the registry knows what the
     // agent is made of (model + tools).
@@ -76,18 +99,49 @@ describe('litellmSource.publishAgent', () => {
     ]);
   });
 
+  it('leads the skill list with the category so xct-home derives it', async () => {
+    enablePublish();
+    axios.get.mockResolvedValue({ data: [] });
+    axios.post.mockResolvedValue({ data: { agent_id: 'uuid-new' } });
+
+    await publishAgent({ ...AGENT_DOC, category: 'translation' }, { req: REQ });
+
+    const [, body] = axios.post.mock.calls[0];
+    expect(body.agent_card_params.skills[0]).toMatchObject({
+      id: 'category:translation',
+      tags: ['translation'],
+    });
+  });
+
+  it('republish updates the existing registry entry in place (PUT)', async () => {
+    enablePublish();
+    axios.get.mockResolvedValue({
+      data: [{ agent_name: 'xct-agent_abc123', agent_id: 'uuid-1' }],
+    });
+    axios.put.mockResolvedValue({ data: { agent_id: 'uuid-1' } });
+
+    const result = await publishAgent(AGENT_DOC, { req: REQ });
+
+    expect(result).toMatchObject({ published: true, agent_id: 'uuid-1' });
+    expect(axios.post).not.toHaveBeenCalled();
+    const [url, , config] = axios.put.mock.calls[0];
+    expect(url).toBe('https://tokenhub.test/v1/agents/uuid-1');
+    expect(config.headers.Authorization).toBe('Bearer sk-user');
+  });
+
   it('returns published:false on gateway errors instead of throwing', async () => {
     enablePublish();
+    axios.get.mockResolvedValue({ data: [] });
     axios.post.mockRejectedValue(new Error('503 from gateway'));
 
-    const result = await publishAgent(AGENT_DOC);
+    const result = await publishAgent(AGENT_DOC, { req: REQ });
     expect(result.published).toBe(false);
     expect(result.reason).toContain('503');
   });
 
   it('rejects agents without an id or name', async () => {
     enablePublish();
-    const result = await publishAgent({ description: 'nameless' });
+    const result = await publishAgent({ description: 'nameless' }, { req: REQ });
     expect(result).toMatchObject({ published: false, reason: 'invalid_agent' });
     expect(axios.post).not.toHaveBeenCalled();
   });

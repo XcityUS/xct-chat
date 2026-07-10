@@ -558,6 +558,14 @@ export const duplicateAgent = ({
   );
 };
 
+export const publishAgent = ({ agent_id }: m.PublishAgentBody): Promise<m.PublishAgentResponse> => {
+  return request.post(
+    endpoints.agents({
+      path: `${agent_id}/publish`,
+    }),
+  );
+};
+
 export const deleteAgent = ({ agent_id }: m.DeleteAgentBody): Promise<void> => {
   return request.delete(
     endpoints.agents({

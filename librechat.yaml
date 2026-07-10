@@ -66,8 +66,11 @@ interface:
   agents:
     use: true
     create: true
-    share: false
-    public: false
+    # Sharing enabled so marketplace-published agents (public AGENT_VIEWER
+    # grant on publish) resolve for other users via /c/new?agent_id=… deep
+    # links from xct-home.
+    share: true
+    public: true
 
 # ---------------------------------------------------------------------------
 # MCP servers

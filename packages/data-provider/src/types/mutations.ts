@@ -159,6 +159,19 @@ export type DuplicateAgentMutationOptions = MutationOptions<
   Pick<DuplicateAgentBody, 'agent_id'>
 >;
 
+export type PublishAgentBody = {
+  agent_id: string;
+};
+
+export type PublishAgentResponse = {
+  status: string;
+  published: boolean;
+  agent_id?: string;
+  reason?: string;
+};
+
+export type PublishAgentMutationOptions = MutationOptions<PublishAgentResponse, PublishAgentBody>;
+
 export type DeleteAgentBody = {
   agent_id: string;
 };

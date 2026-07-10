@@ -51,7 +51,10 @@ const {
 } = require('~/server/services/MCP');
 const { attachOwnerContacts } = require('~/server/services/Agents/ownerContact');
 const { getMCPServersRegistry } = require('~/config');
-const { injectAgents: injectLiteLLMAgents } = require('~/server/services/litellmSource');
+const {
+  injectAgents: injectLiteLLMAgents,
+  publishAgent: publishLiteLLMAgent,
+} = require('~/server/services/litellmSource');
 const { getLogStores } = require('~/cache');
 const db = require('~/models');
 
@@ -1376,12 +1379,55 @@ const getAgentCategories = async (_req, res) => {
     });
   }
 };
+/**
+ * Publishes an agent to the XCity gateway marketplace (tokenhub registry)
+ * under the calling user's identity, and makes it publicly viewable inside
+ * xct-chat so marketplace deep links (`/c/new?agent_id=…`) resolve for
+ * other users.
+ *
+ * @route POST /agents/:id/publish
+ * @param {string} req.params.id - Agent identifier.
+ * @returns {{status: string, published: boolean, agent_id?: string, reason?: string}} 200
+ */
+const publishAgentHandler = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const agent = await db.getAgent({ id });
+    if (!agent) {
+      return res.status(404).json({ error: 'Agent not found', status: 'error' });
+    }
+
+    const result = await publishLiteLLMAgent({ ...agent, id: agent.id ?? id }, { req });
+    if (!result.published) {
+      const status = result.reason === 'disabled' || result.reason === 'no_user_key' ? 403 : 502;
+      return res.status(status).json({ status: 'error', ...result });
+    }
+
+    // Marketplace deep links land other users on this agent — grant public
+    // view access so the link resolves beyond the author.
+    await grantPermission({
+      principalType: PrincipalType.PUBLIC,
+      principalId: null,
+      resourceType: ResourceType.AGENT,
+      resourceId: agent._id,
+      accessRoleId: AccessRoleIds.AGENT_VIEWER,
+      grantedBy: req.user.id,
+    });
+
+    return res.status(200).json({ status: 'success', ...result });
+  } catch (error) {
+    logger.error('[/Agents/:id/publish] Error publishing agent', error);
+    return res.status(500).json({ error: error.message, status: 'error' });
+  }
+};
+
 module.exports = {
   createAgent: createAgentHandler,
   getAgent: getAgentHandler,
   getAgentVersions: getAgentVersionsHandler,
   updateAgent: updateAgentHandler,
   duplicateAgent: duplicateAgentHandler,
+  publishAgent: publishAgentHandler,
   deleteAgent: deleteAgentHandler,
   getListAgents: getListAgentsHandler,
   uploadAgentAvatar: uploadAgentAvatarHandler,

@@ -36,12 +36,27 @@ optional `XCT_ENDPOINT_NAME` (default `XCity AI`).
 - Read-only surfacing of LiteLLM `/v1/agents` and `/v1/xct-skills` in the
   Agent Marketplace / Skills board. Gated behind `LITELLM_AGENTS_ENABLED` /
   `LITELLM_SKILLS_ENABLED`, fail-safe empty lists.
-- `publishAgent(agent)` (P4 publish-sync): pushes a LibreChat-built agent to
-  the tokenhub registry (`POST /v1/agents`, A2A agent card with the resource
-  composition encoded as skills) so it surfaces in xct-home's catalog. Gated
-  behind `LITELLM_PUBLISH_ENABLED`, fail-safe `{published:false, reason}`.
-  Tests: `litellmSource.spec.js`. UI trigger not wired yet (product decision:
-  auto-publish on share vs. review queue).
+- `publishAgent(agent, { req })` (marketplace self-publish): pushes a
+  LibreChat-built agent to the tokenhub registry **under the publishing
+  user's own vkey** (XCT key exchange), so the registry's `created_by`
+  records real ownership — this is what xct-home's official/community badge
+  and "My Agents" key off. Requires the gateway flag
+  `AGENT_REGISTRY_ALLOW_USER_WRITES` (xcity-litellm#25). Republish is an
+  update-in-place (`PUT /v1/agents/{id}` when the stable name
+  `xct-<agent id>` already exists); the card carries the author
+  (`provider.organization`) and leads its skills with the agent category.
+  Gated behind `LITELLM_PUBLISH_ENABLED`, fail-safe
+  `{published:false, reason}` (`no_user_key` when the vkey exchange is off
+  or fails — the shared key must never own a publication).
+  Wiring: `POST /api/agents/:id/publish`
+  (`api/server/routes/agents/v1.js` + `controllers/agents/v1.js`
+  `publishAgentHandler`, which also grants public `AGENT_VIEWER` so
+  `/c/new?agent_id=…` deep links resolve for other users), client
+  `PublishAgent.tsx` button in the agent-builder footer +
+  `usePublishAgentMutation` (data-provider `publishAgent`).
+  `librechat.yaml` `interface.agents.share/public: true`.
+  Tests: `litellmSource.spec.js` (user-vkey required, POST vs republish PUT,
+  category-led skills, author provider).
 
 ### 3. Native in-chat video generation (`video_gen` tool)
 

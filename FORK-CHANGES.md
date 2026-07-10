@@ -43,6 +43,53 @@ optional `XCT_ENDPOINT_NAME` (default `XCity AI`).
   Tests: `litellmSource.spec.js`. UI trigger not wired yet (product decision:
   auto-publish on share vs. review queue).
 
+### 3. Native in-chat video generation (`video_gen` tool)
+
+LibreChat ships no native video tool. The fork adds one that routes through the
+LiteLLM gateway (tokenhub) so per-user budgets/permissions and billing apply,
+mirroring the built-in OpenAI image tools. Image generation reuses the existing
+`image_gen_oai` tool by pointing `IMAGE_GEN_OAI_MODEL` at a gateway image model
+(e.g. the Dreamina/Seedance image id) — config only, no code.
+
+- `api/app/clients/tools/structured/VideoGenTools.js` — new class-based tool
+  (mirrors `FluxAPI`). Calls the gateway video API (create → poll → retrieve),
+  tolerant of sync/async response shapes, returns a `content_and_artifact`
+  tuple carrying a `VIDEO_URL` part. Config-driven via `VIDEO_GEN_*` env so the
+  Phase-0 contract check is a config tweak, not a code change. No upstream
+  conflicts (new file).
+- `api/app/clients/tools/index.js`, `api/app/clients/tools/util/handleTools.js`,
+  `api/app/clients/tools/manifest.json` — register `video_gen` in
+  `toolConstructors` + `toolOptions`, export the class, add the plugin/auth
+  entry (`VIDEO_GEN_API_KEY`). On upstream merge, re-apply the three small
+  additive hunks if these files changed.
+- `api/server/services/Files/process.js` — `saveVideoFromUrl(url, …)` persists a
+  `data:`/`http(s)` video to the file store and creates a `video/*` file record
+  (`FileContext.video_generation`).
+- `api/server/controllers/agents/callbacks.js` — both artifact-content handlers
+  (streaming + Responses API) persist `video_url` parts via `saveVideoFromUrl`
+  and emit the attachment. Additive branch before the existing `image_url` path.
+- `packages/data-provider/src/types/files.ts` — `FileContext.video_generation`.
+- `client/.../Content/Parts/attachmentTypes.ts` + `Attachment.tsx` —
+  `isVideoAttachment` classifier and a `VideoAttachment` (`<video controls>`)
+  renderer wired into `Attachment` and `AttachmentGroup`.
+- `client/src/locales/en/translation.json` — `com_ui_generated_video`.
+- Tests: `api/test/app/clients/tools/structured/VideoGenTools.test.js`,
+  `api/test/app/services/Files/saveVideoFromUrl.test.js` (mp4 base64-decode
+  regression + SSRF-protocol guard).
+
+Hardening (from independent review): abort-signal + per-request timeout on all
+gateway calls; `base64ToBuffer` regex widened to `[^;,]+` so `video/mp4`
+data-URLs decode (digit-in-MIME-type bug — also fixed for any image type with a
+digit); `saveVideoFromUrl` enforces an `http(s)` protocol allowlist + max-size
+cap; the client `<video>` resolves its src via `apiBaseUrl()` like `Image.tsx`.
+`saveVideoFromUrl` lives in `process.js` beside its analog `saveBase64Image`
+(both persist generated media from a URL) rather than in `packages/api`, for
+consistency with the existing helper.
+
+Env (absent = tool disabled; upstream behavior unchanged): `VIDEO_GEN_API_KEY`
+(required to enable), `VIDEO_GEN_BASEURL`, `VIDEO_GEN_MODEL`, optional
+`VIDEO_GEN_CREATE_PATH`, `VIDEO_GEN_POLL_INTERVAL_MS`, `VIDEO_GEN_MAX_WAIT_MS`.
+
 ## Pending (contract ready, needs live-gateway verification)
 
 - **Per-request `metadata.xct_agent_id` injection** (P3 agent-dimension

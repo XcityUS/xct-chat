@@ -127,6 +127,57 @@ Models are discovered automatically via the LiteLLM `/v1/models` endpoint:
 - ✅ `railway.env.template` - Added `LITELLM_API_KEY` variable
 - ✅ `XCT-LITELLM-INTEGRATION.md` - This documentation file
 
+## Content Creation (Image & Video)
+
+Both image and video generation route through the same gateway virtual key, so
+per-plan model access + budgets apply automatically.
+
+### Image
+Built-in `image_gen_oai` / `image_edit_oai` agent tools call
+`POST {IMAGE_GEN_OAI_BASEURL}/images/generations`. Point them at the gateway and
+set the model:
+
+```bash
+IMAGE_GEN_OAI_API_KEY=${LITELLM_API_KEY}
+IMAGE_GEN_OAI_BASEURL=https://tokenhub.xcity.one/v1
+IMAGE_GEN_OAI_MODEL=gpt-image-1   # or the Dreamina/Seedance image id
+```
+
+This is a **single-model** tool: choosing the seedance image id replaces
+`gpt-image-1` for this tool. Also verify the gpt-image-specific params
+(`background`, `quality`, `size`) are tolerated by the model on the gateway.
+
+### Video
+The fork adds a native `video_gen` agent tool (see `FORK-CHANGES.md §3`) that
+calls the gateway's video API (`create → poll → retrieve`) and returns the clip
+as an inline video attachment. Enable it with:
+
+```bash
+VIDEO_GEN_API_KEY=${LITELLM_API_KEY}
+VIDEO_GEN_BASEURL=https://tokenhub.xcity.one/v1
+VIDEO_GEN_MODEL=dreamina-seedance-2-0-260128
+# VIDEO_GEN_CREATE_PATH=/videos   # override if the gateway path differs
+```
+
+**Phase-0 verification (before production):** confirm the model's mode and
+request/response contract on the live gateway:
+
+```bash
+curl -s https://tokenhub.xcity.one/v1/model/info \
+  -H "Authorization: Bearer $LITELLM_API_KEY" \
+  | jq '.data[] | select(.model_name|test("seedance|dreamina"))'
+```
+
+If the video endpoint path or job-status shape differs from the OpenAI-style
+`/videos` default, override `VIDEO_GEN_CREATE_PATH` — the tool's response
+parsing already tolerates the common sync/async envelopes.
+
+### Can xct-home use the model?
+Yes, provided (1) the model is in the `model_access` list for the virtual keys
+xct-home uses, and (2) xct-home either deep-links into an xct-chat agent that
+carries `video_gen`/`image_gen_oai` (recommended — keeps media billing through
+tokenhub) or calls the gateway endpoints directly.
+
 ## Related Documentation
 
 - [LibreChat Custom Endpoints](https://www.librechat.ai/docs/configuration/librechat_yaml/ai_endpoints)

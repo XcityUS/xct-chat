@@ -37,6 +37,7 @@ const {
   TavilySearchResults,
   createGeminiImageTool,
   createOpenAIImageTools,
+  VideoGenTool,
 } = require('../');
 const {
   createMCPTool,
@@ -180,6 +181,7 @@ const loadTools = async ({
 }) => {
   const toolConstructors = {
     flux: FluxAPI,
+    video_gen: VideoGenTool,
     calculator: Calculator,
     google: GoogleSearchAPI,
     open_weather: OpenWeather,
@@ -261,6 +263,7 @@ const loadTools = async ({
   const toolOptions = {
     flux: imageGenOptions,
     dalle: imageGenOptions,
+    video_gen: imageGenOptions,
     'stable-diffusion': imageGenOptions,
     gemini_image_gen: imageGenOptions,
   };

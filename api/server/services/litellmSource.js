@@ -1,5 +1,6 @@
 const axios = require('axios');
 const { logger } = require('@librechat/data-schemas');
+const { resolveUserVKey, xctKeyExchangeEnabled } = require('@librechat/api');
 
 /**
  * Integration with the XCity LiteLLM gateway (tokenhub.xcity.one) as an external,
@@ -201,29 +202,60 @@ async function injectSkills(data, { search, cursor } = {}) {
 const publishEnabled = () => flagEnabled('LITELLM_PUBLISH_ENABLED') && hasCredentials();
 
 /**
- * P4 publish-sync: push a LibreChat-built agent to the tokenhub registry
- * (POST /v1/agents) so it surfaces in xct-home's catalog and becomes a
- * platform-wide consumption unit.
+ * Publish-sync: push a LibreChat-built agent to the tokenhub registry so it
+ * surfaces in xct-home's marketplace as a *community* agent owned by the
+ * publishing user.
+ *
+ * Ownership: the registry records `created_by` from the calling key's
+ * user_id, so publication MUST use the user's own gateway vkey (XCT key
+ * exchange) — the shared service key would register the agent under the
+ * service identity and break "my agents" / owner re-publish. Requires the
+ * gateway's AGENT_REGISTRY_ALLOW_USER_WRITES flag.
+ *
+ * Republish is an update-in-place: the registry name `xct-<agent id>` is
+ * stable, so we look up the caller-visible agent by name and PUT when it
+ * already exists.
  *
  * Same contract as everything else in this module — gated
  * (LITELLM_PUBLISH_ENABLED) and fail-safe: never throws, returns
  * `{ published: false, reason }` on any problem.
  *
  * @param {object} agent - LibreChat agent document (id, name, description,
- *   instructions, model, tools).
+ *   category, model, tools).
+ * @param {object} [options]
+ * @param {ServerRequest} [options.req] - request carrying the publishing user.
  * @returns {Promise<{published: boolean, agent_id?: string, reason?: string}>}
  */
-async function publishAgent(agent) {
+async function publishAgent(agent, { req } = {}) {
   if (!publishEnabled()) {
     return { published: false, reason: 'disabled' };
   }
   if (!agent?.id || !agent?.name) {
     return { published: false, reason: 'invalid_agent' };
   }
+  const userKey = xctKeyExchangeEnabled() && req?.user ? await resolveUserVKey(req.user) : null;
+  if (!userKey) {
+    return { published: false, reason: 'no_user_key' };
+  }
   try {
-    // A2A-style agent card; skills encode the resource composition so the
-    // registry (and xct-home's catalog) knows what the agent is made of.
+    const headers = { Authorization: `Bearer ${userKey}` };
+    const agentName = `xct-${agent.id}`;
+    const authorName =
+      req.user?.name || req.user?.username || (req.user?.email || '').split('@')[0] || 'Xcity user';
+    // A2A-style agent card; the category leads the skill list so xct-home's
+    // category derivation (first skill tag) lands on it, and provider carries
+    // the display author for the community badge.
     const skills = [
+      ...(agent.category
+        ? [
+            {
+              id: `category:${agent.category}`,
+              name: agent.category,
+              description: 'Marketplace category',
+              tags: [agent.category],
+            },
+          ]
+        : []),
       ...(agent.model
         ? [
             {
@@ -242,18 +274,24 @@ async function publishAgent(agent) {
       })),
     ];
     const body = {
-      agent_name: `xct-${agent.id}`,
+      agent_name: agentName,
       agent_card_params: {
         name: agent.name,
         description: agent.description || '',
+        provider: { organization: authorName },
         skills,
       },
+      litellm_params: { make_public: true },
     };
-    const resp = await axios.post(`${getBaseUrl()}/v1/agents`, body, {
-      headers: authHeaders(),
-      timeout: 8000,
-    });
-    const agentId = resp?.data?.agent_id || resp?.data?.id || body.agent_name;
+    const list = await axios.get(`${getBaseUrl()}/v1/agents`, { headers, timeout: 8000 });
+    const existing = asArray(list.data).find((record) => record?.agent_name === agentName);
+    const resp = existing?.agent_id
+      ? await axios.put(`${getBaseUrl()}/v1/agents/${existing.agent_id}`, body, {
+          headers,
+          timeout: 8000,
+        })
+      : await axios.post(`${getBaseUrl()}/v1/agents`, body, { headers, timeout: 8000 });
+    const agentId = resp?.data?.agent_id || resp?.data?.id || existing?.agent_id || agentName;
     logger.info(`[litellmSource] published agent ${agent.id} → ${agentId}`);
     return { published: true, agent_id: agentId };
   } catch (err) {

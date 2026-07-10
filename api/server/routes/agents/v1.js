@@ -132,6 +132,23 @@ router.post(
 );
 
 /**
+ * Publishes an agent to the XCity gateway marketplace under the calling
+ * user's identity (XCT fork; see FORK-CHANGES.md).
+ * @route POST /agents/:id/publish
+ * @param {string} req.params.id - Agent identifier.
+ * @returns {{status: string, published: boolean, agent_id?: string}} 200 - success response
+ */
+router.post(
+  '/:id/publish',
+  checkAgentCreate,
+  canAccessAgentResource({
+    requiredPermission: PermissionBits.EDIT,
+    resourceIdParam: 'id',
+  }),
+  v1.publishAgent,
+);
+
+/**
  * Deletes an agent.
  * @route DELETE /agents/:id
  * @param {string} req.params.id - Agent identifier.

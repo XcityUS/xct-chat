@@ -155,6 +155,13 @@ jest.mock('../DuplicateAgent', () => ({
   ),
 }));
 
+jest.mock('../PublishAgent', () => ({
+  __esModule: true,
+  default: ({ agent_id }: { agent_id: string }) => (
+    <button data-testid="publish-button" data-agent-id={agent_id} title="Publish to Marketplace" />
+  ),
+}));
+
 jest.mock('@librechat/client', () => ({
   Spinner: () => <div data-testid="spinner" />,
 }));

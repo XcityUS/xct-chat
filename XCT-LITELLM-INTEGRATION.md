@@ -132,51 +132,61 @@ Models are discovered automatically via the LiteLLM `/v1/models` endpoint:
 Both image and video generation route through the same gateway virtual key, so
 per-plan model access + budgets apply automatically.
 
+On the gateway, ByteDance's creative models split by modality:
+**Seedream = image** (`seedream-5-0-260128`, `seedream-4-5-251128`),
+**Seedance = video** (`dreamina-seedance-2-0-260128`, `seedance-1-5-pro-…`).
+Both lines are accessible to the xct-chat virtual key (verified 2026-07-10).
+
 ### Image
 Built-in `image_gen_oai` / `image_edit_oai` agent tools call
 `POST {IMAGE_GEN_OAI_BASEURL}/images/generations`. Point them at the gateway and
-set the model:
+set the model to a **seedream** id (not seedance — that's video):
 
 ```bash
 IMAGE_GEN_OAI_API_KEY=${LITELLM_API_KEY}
 IMAGE_GEN_OAI_BASEURL=https://tokenhub.xcity.one/v1
-IMAGE_GEN_OAI_MODEL=gpt-image-1   # or the Dreamina/Seedance image id
+IMAGE_GEN_OAI_MODEL=gpt-image-1   # or seedream-5-0-260128 for Dreamina image
 ```
 
-This is a **single-model** tool: choosing the seedance image id replaces
-`gpt-image-1` for this tool. Also verify the gpt-image-specific params
-(`background`, `quality`, `size`) are tolerated by the model on the gateway.
+This is a **single-model** tool: choosing a seedream id replaces `gpt-image-1`
+for this tool. Also verify the gpt-image-specific params (`background`,
+`quality`, `size`) are tolerated by the model on the gateway.
 
-### Video
+### Video (Phase-0 verified ✅)
 The fork adds a native `video_gen` agent tool (see `FORK-CHANGES.md §3`) that
-calls the gateway's video API (`create → poll → retrieve`) and returns the clip
-as an inline video attachment. Enable it with:
+calls the gateway's video API and returns the clip as an inline video
+attachment. Enable it with:
 
 ```bash
 VIDEO_GEN_API_KEY=${LITELLM_API_KEY}
 VIDEO_GEN_BASEURL=https://tokenhub.xcity.one/v1
 VIDEO_GEN_MODEL=dreamina-seedance-2-0-260128
-# VIDEO_GEN_CREATE_PATH=/videos   # override if the gateway path differs
 ```
 
-**Phase-0 verification (before production):** confirm the model's mode and
-request/response contract on the live gateway:
+**Verified contract** (from the LiteLLM source + a live probe of tokenhub):
+`dreamina-seedance-2-0-260128` is a **BytePlus (ByteDance Ark) video** model
+exposed via LiteLLM's OpenAI-compatible video API:
 
-```bash
-curl -s https://tokenhub.xcity.one/v1/model/info \
-  -H "Authorization: Bearer $LITELLM_API_KEY" \
-  | jq '.data[] | select(.model_name|test("seedance|dreamina"))'
-```
+- `POST /v1/videos` → `{ id: "cgt-…", status: "queued" }`
+- `GET /v1/videos/{id}` → `{ status, output_url }` (`succeeded` → `completed`)
+- `GET /v1/videos/{id}/content` → binary (fallback if no `output_url`)
 
-If the video endpoint path or job-status shape differs from the OpenAI-style
-`/videos` default, override `VIDEO_GEN_CREATE_PATH` — the tool's response
-parsing already tolerates the common sync/async envelopes.
+Create params are OpenAI-standard: `prompt`, `seconds`, `size` (e.g.
+`1280x720`), `input_reference` (image URL → image-to-video). The tool sends
+these and reads the URL off `output_url` (with defensive fallbacks). If a future
+model is registered under a different video path, override
+`VIDEO_GEN_CREATE_PATH` — no code change.
 
 ### Can xct-home use the model?
-Yes, provided (1) the model is in the `model_access` list for the virtual keys
-xct-home uses, and (2) xct-home either deep-links into an xct-chat agent that
-carries `video_gen`/`image_gen_oai` (recommended — keeps media billing through
-tokenhub) or calls the gateway endpoints directly.
+**Yes.** The model is registered on tokenhub and accessible to the xct-chat
+virtual key (verified). xct-home surfaces gateway models via `ModelCatalog.astro`
+(built from `GET /v1/models` in `lib/litellm.ts`) and deep-links each into
+`chat.xcity.one/c/new?endpoint=XCity%20AI&model=…` — so once a user's plan
+`model_access` includes the seedance/seedream ids, they appear in xct-home's
+catalog and route into xct-chat automatically. Gating is per-plan `model_access`
+in xcity-litellm (a config/DB concern, not code). Recommended surface stays the
+deep-link (keeps media billing through tokenhub) rather than xct-home calling
+the gateway directly.
 
 ## Related Documentation
 

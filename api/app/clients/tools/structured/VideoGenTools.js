@@ -13,20 +13,17 @@ const videoGenJsonSchema = {
       description:
         'Detailed description of the video to generate. Describe the scene, subject, motion, camera movement, lighting, and mood. Use positive, descriptive language.',
     },
-    duration: {
+    seconds: {
       type: 'number',
       description:
         'Desired length of the clip in seconds (e.g. 5). Optional; the model applies its default when omitted.',
     },
-    aspect_ratio: {
+    size: {
       type: 'string',
-      description: 'Aspect ratio of the video, e.g. "16:9", "9:16", or "1:1". Optional.',
+      description:
+        'Target frame size in pixels, e.g. "1280x720" (landscape), "720x1280" (portrait), or "1024x1024" (square). Optional.',
     },
-    resolution: {
-      type: 'string',
-      description: 'Target resolution, e.g. "720p" or "1080p". Optional.',
-    },
-    image_url: {
+    input_reference: {
       type: 'string',
       description:
         'Optional URL of a reference image to animate (image-to-video). When provided, the video is generated from this still image guided by the prompt.',
@@ -105,6 +102,12 @@ function extractVideoUrl(body) {
     return `data:video/mp4;base64,${b64}`;
   }
   const candidates = [
+    // LiteLLM-normalized OpenAI VideoObject (BytePlus/seedance): the completed
+    // status response carries the playable URL on `output_url`.
+    body.output_url,
+    // Raw BytePlus passthrough shape: { status, content: { video_url } }.
+    body.content?.video_url,
+    body.content?.url,
     first?.url,
     typeof first?.video_url === 'string' ? first.video_url : first?.video_url?.url,
     body.url,
@@ -164,7 +167,7 @@ class VideoGenTool extends Tool {
     this.description =
       'Generate a short video from a text prompt (optionally animating a reference image). Each call produces one video clip. Use for requests to create, animate, or render a video/clip/motion scene.';
     this.description_for_model =
-      "// Turn the user's idea into a vivid, specific video prompt: describe subject, setting, motion, camera movement, lighting, and mood in 2-4 sentences. Provide `image_url` to animate an existing image (image-to-video). Generation can take up to a few minutes.";
+      "// Turn the user's idea into a vivid, specific video prompt: describe subject, setting, motion, camera movement, lighting, and mood in 2-4 sentences. Provide `input_reference` (an image URL) to animate an existing image (image-to-video). Generation can take up to a few minutes.";
     this.schema = videoGenJsonSchema;
   }
 
@@ -235,19 +238,19 @@ class VideoGenTool extends Tool {
     });
   }
 
-  buildPayload({ prompt, duration, aspect_ratio, resolution, image_url }) {
+  buildPayload({ prompt, seconds, size, input_reference }) {
+    // OpenAI-compatible video-create params (LiteLLM /v1/videos normalizes these
+    // to the provider, e.g. BytePlus/Seedance: seconds→duration, size→ratio,
+    // input_reference→image content part).
     const payload = { model: this.model, prompt };
-    if (duration != null) {
-      payload.duration = duration;
+    if (seconds != null) {
+      payload.seconds = seconds;
     }
-    if (aspect_ratio) {
-      payload.aspect_ratio = aspect_ratio;
+    if (size) {
+      payload.size = size;
     }
-    if (resolution) {
-      payload.resolution = resolution;
-    }
-    if (image_url) {
-      payload.image_url = image_url;
+    if (input_reference) {
+      payload.input_reference = input_reference;
     }
     return payload;
   }

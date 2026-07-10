@@ -86,9 +86,28 @@ cap; the client `<video>` resolves its src via `apiBaseUrl()` like `Image.tsx`.
 (both persist generated media from a URL) rather than in `packages/api`, for
 consistency with the existing helper.
 
+Phase-0 contract verified (LiteLLM source + live tokenhub probe, 2026-07-10):
+`dreamina-seedance-2-0-260128` is a BytePlus video model on LiteLLM's
+OpenAI-compatible video API (`POST /v1/videos` → poll `GET /v1/videos/{id}` →
+completed job carries `output_url`; `/content` binary fallback). The tool now
+sends OpenAI-standard create params (`prompt`, `seconds`, `size`,
+`input_reference`) and reads `output_url` first. Image generation uses a
+**seedream** id (e.g. `seedream-5-0-260128`) — seedance ids are video-only.
+
 Env (absent = tool disabled; upstream behavior unchanged): `VIDEO_GEN_API_KEY`
 (required to enable), `VIDEO_GEN_BASEURL`, `VIDEO_GEN_MODEL`, optional
 `VIDEO_GEN_CREATE_PATH`, `VIDEO_GEN_POLL_INTERVAL_MS`, `VIDEO_GEN_MAX_WAIT_MS`.
+
+**Per-user billing** (`handleTools.js`): the image (`image_gen_oai`) and video
+(`video_gen`) tools resolve the signed-in user's own gateway vkey via
+`resolveUserVKey` (the same XCT key exchange the chat endpoint uses, FORK-CHANGES
+§1) and use it as the tool's API key, so in-chat media generation counts against
+the user's per-plan budget instead of the shared `${LITELLM_API_KEY}`. Gated by
+`XCT_KEY_EXCHANGE_ENABLED` and fail-safe: a null exchange falls back to the
+shared key. Requires exporting `resolveUserVKey` / `xctKeyExchangeEnabled` from
+`@librechat/api` (`packages/api/src/endpoints/custom/index.ts` barrels
+`xctKeyExchange`). `video_gen` moved from `toolConstructors` to
+`customConstructors` so the resolved vkey can be injected per request.
 
 ## Pending (contract ready, needs live-gateway verification)
 

@@ -5,12 +5,14 @@ const {
   toolkitParent,
   createSafeUser,
   mcpToolPattern,
+  resolveUserVKey,
   loadWebSearchAuth,
   buildInlineMemoryTool,
   getCodeApiAuthHeaders,
   buildImageToolContext,
   SET_MEMORY_TOOL_NAME,
   buildWebSearchContext,
+  xctKeyExchangeEnabled,
   DELETE_MEMORY_TOOL_NAME,
   buildWebSearchDynamicContext,
 } = require('@librechat/api');
@@ -181,7 +183,6 @@ const loadTools = async ({
 }) => {
   const toolConstructors = {
     flux: FluxAPI,
-    video_gen: VideoGenTool,
     calculator: Calculator,
     google: GoogleSearchAPI,
     open_weather: OpenWeather,
@@ -205,8 +206,12 @@ const loadTools = async ({
       if (toolContext) {
         dynamicToolContextMap.image_edit_oai = toolContext;
       }
+      // XCT fork: bill media generation to the user's own gateway vkey (same
+      // per-plan budget as chat). Fail-safe: null exchange keeps the shared key.
+      const xctVKey = xctKeyExchangeEnabled() ? await resolveUserVKey(options.req?.user) : null;
       return createOpenAIImageTools({
         ...authValues,
+        ...(xctVKey ? { IMAGE_GEN_OAI_API_KEY: xctVKey } : {}),
         isAgent: !!agent,
         req: options.req,
         imageOutputType,
@@ -233,6 +238,20 @@ const loadTools = async ({
         imageFiles,
         userId: user,
         fileStrategy,
+      });
+    },
+    video_gen: async () => {
+      const authFields = getAuthFields('video_gen');
+      const authValues = await loadAuthValues({ userId: user, authFields, throwError: false });
+      // XCT fork: bill video generation to the user's own gateway vkey. Fail-safe:
+      // null exchange falls back to the shared VIDEO_GEN_API_KEY.
+      const xctVKey = xctKeyExchangeEnabled() ? await resolveUserVKey(options.req?.user) : null;
+      return new VideoGenTool({
+        isAgent: !!agent,
+        req: options.req,
+        fileStrategy,
+        userId: user,
+        VIDEO_GEN_API_KEY: xctVKey ?? authValues.VIDEO_GEN_API_KEY,
       });
     },
   };
@@ -263,7 +282,6 @@ const loadTools = async ({
   const toolOptions = {
     flux: imageGenOptions,
     dalle: imageGenOptions,
-    video_gen: imageGenOptions,
     'stable-diffusion': imageGenOptions,
     gemini_image_gen: imageGenOptions,
   };

@@ -71,6 +71,10 @@ interface:
     # links from xct-home.
     share: true
     public: true
+  sharedLinks:
+    create: true
+    share: true
+    public: true
 
 # ---------------------------------------------------------------------------
 # MCP servers

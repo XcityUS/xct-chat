@@ -123,9 +123,8 @@ const isSharedMessagesRequest = (url?: string, method?: string) =>
   SHARED_MESSAGES_PATH_REGEX.test(stripBasePath(getRequestPathname(url)));
 
 /** The "continue this chat" fork is a deliberate authenticated action initiated
- *  from a share page, so it must reach auth recovery/redirect like the shared
- *  data request — otherwise a logged-out (or cold-loaded) viewer's 401 is
- *  rejected silently instead of routing them through login. */
+ *  from a share page, so it must reach auth recovery before ShareView handles a
+ *  remaining 401 with its auth dialog. */
 const isShareForkRequest = (url?: string, method?: string) =>
   method?.toLowerCase() === 'post' &&
   SHARE_FORK_PATH_REGEX.test(stripBasePath(getRequestPathname(url)));
@@ -314,6 +313,7 @@ if (typeof window !== 'undefined') {
       }
 
       const isRefreshRequest = originalRequest.url?.includes('/api/auth/refresh') === true;
+      const isForkRequest = isShareForkRequest(originalRequest.url, originalRequest.method);
       if (isAuthRecoveryEndpoint(originalRequest.url) && !isRefreshRequest) {
         return Promise.reject(error);
       }
@@ -323,14 +323,13 @@ if (typeof window !== 'undefined') {
       }
 
       /** Skip refresh when the Authorization header has been cleared (e.g. during logout),
-       *  but allow the shared link data request to proceed so private shares can still
-       *  recover auth/redirect without unrelated share-page queries forcing login. */
+       *  but allow share data/fork requests to proceed so private shares can still
+       *  recover auth without unrelated share-page queries forcing login. */
       if (
         !axios.defaults.headers.common['Authorization'] &&
         !(
           isSharePage() &&
-          (isSharedMessagesRequest(originalRequest.url, originalRequest.method) ||
-            isShareForkRequest(originalRequest.url, originalRequest.method))
+          (isSharedMessagesRequest(originalRequest.url, originalRequest.method) || isForkRequest)
         )
       ) {
         return Promise.reject(error);
@@ -358,13 +357,16 @@ if (typeof window !== 'undefined') {
             return await axios(originalRequest);
           }
 
-          redirectToLoginOnce();
+          if (!isForkRequest) {
+            redirectToLoginOnce();
+          }
           return Promise.reject(error);
         } catch {
-          /** A rejected refresh (stale/invalid session → 401/403) must route to
-           *  login just like an empty-token refresh, otherwise the original 401
-           *  surfaces to the caller (e.g. the share fork button) with no redirect. */
-          redirectToLoginOnce();
+          /** A rejected refresh lets share fork 401s surface to ShareView for the
+           *  auth dialog; all other requests still route to login. */
+          if (!isForkRequest) {
+            redirectToLoginOnce();
+          }
           return Promise.reject(error);
         }
       }

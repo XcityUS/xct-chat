@@ -201,6 +201,19 @@ describe('canAccessSharedLink', () => {
       expect(next).not.toHaveBeenCalled();
     });
 
+    test('returns 401 for anonymous access without a public grant when ALLOW_SHARED_LINKS_PUBLIC is true', async () => {
+      const link = await createTestLink();
+      process.env.ALLOW_SHARED_LINKS_PUBLIC = 'true';
+
+      const req = createReq({ params: { shareId: link.shareId } });
+      const res = createRes();
+      const next = jest.fn();
+      await canAccessSharedLink(req, res, next as unknown as NextFunction);
+
+      expect(res._status).toBe(401);
+      expect(next).not.toHaveBeenCalled();
+    });
+
     test('calls next() for authenticated access to public link even without ALLOW_SHARED_LINKS_PUBLIC', async () => {
       const link = await createTestLink();
       await grantPublicViewer(link._id);

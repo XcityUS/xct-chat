@@ -58,6 +58,7 @@ describe('buildSharedLinkStartupPayload', () => {
         CUSTOM_FOOTER: 'Shared footer',
         SANDPACK_BUNDLER_URL: 'https://bundler.example.com',
         SANDPACK_STATIC_BUNDLER_URL: 'https://static-bundler.example.com',
+        SHARED_LINKS_REGISTRATION_URL: 'https://example.com/register',
       },
     );
 
@@ -67,6 +68,7 @@ describe('buildSharedLinkStartupPayload', () => {
       bundlerURL: 'https://bundler.example.com',
       staticBundlerURL: 'https://static-bundler.example.com',
       customFooter: 'Shared footer',
+      registrationUrl: 'https://example.com/register',
       interface: {
         privacyPolicy: { externalUrl: 'https://example.com/privacy' },
         termsOfService: { externalUrl: 'https://example.com/tos' },
@@ -81,5 +83,15 @@ describe('buildSharedLinkStartupPayload', () => {
     );
 
     expect(payload).toEqual({ appTitle: 'LibreChat' });
+    expect(payload).not.toHaveProperty('registrationUrl');
+  });
+
+  it('omits an empty registration URL', () => {
+    const payload = buildSharedLinkStartupPayload(null, {
+      SHARED_LINKS_REGISTRATION_URL: '',
+    });
+
+    expect(payload).toEqual({ appTitle: 'LibreChat' });
+    expect(payload).not.toHaveProperty('registrationUrl');
   });
 });

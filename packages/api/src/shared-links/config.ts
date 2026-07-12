@@ -55,6 +55,12 @@ export function buildSharedLinkStartupPayload(
   if (typeof env.CUSTOM_FOOTER === 'string') {
     payload.customFooter = env.CUSTOM_FOOTER;
   }
+  if (
+    typeof env.SHARED_LINKS_REGISTRATION_URL === 'string' &&
+    env.SHARED_LINKS_REGISTRATION_URL.length > 0
+  ) {
+    payload.registrationUrl = env.SHARED_LINKS_REGISTRATION_URL;
+  }
 
   const { privacyPolicy, termsOfService } = appConfig?.interfaceConfig ?? {};
   if (privacyPolicy || termsOfService) {

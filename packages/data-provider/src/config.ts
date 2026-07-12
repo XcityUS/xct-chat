@@ -1587,6 +1587,7 @@ export type TSharedLinkStartupConfig = Pick<TStartupConfig, 'appTitle'> &
     'analyticsGtmId' | 'bundlerURL' | 'customFooter' | 'staticBundlerURL'
   > & {
     interface?: TSharedLinkStartupInterface;
+    registrationUrl?: string;
   };
 
 export enum OCRStrategy {

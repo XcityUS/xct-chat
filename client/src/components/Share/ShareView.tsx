@@ -1,6 +1,6 @@
 import { memo, useState, useCallback, useContext } from 'react';
 import Cookies from 'js-cookie';
-import { buildTree } from 'librechat-data-provider';
+import { buildTree, apiBaseUrl, buildLoginRedirectUrl } from 'librechat-data-provider';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useRecoilState, useRecoilCallback } from 'recoil';
 import { CalendarDays, Settings, MessageSquarePlus } from 'lucide-react';
@@ -18,10 +18,9 @@ import {
   useToastContext,
 } from '@librechat/client';
 import { ThemeSelector, LangSelector } from '~/components/Nav/SettingsTabs/General/Selectors';
+import { useForkSharedConvoMutation, useGetSharedStartupConfig } from '~/data-provider';
 import { cn, getResponseStatus, selectActiveBranchTail } from '~/utils';
 import { ShareMessagesProvider } from './ShareMessagesProvider';
-import { useForkSharedConvoMutation } from '~/data-provider';
-import { useGetSharedStartupConfig } from '~/data-provider';
 import { ShareArtifactsContainer } from './ShareArtifacts';
 import { useLocalize, useDocumentTitle } from '~/hooks';
 import { ShareContext } from '~/Providers';
@@ -42,6 +41,7 @@ function SharedView() {
   const { data, isLoading } = useGetSharedMessages(shareId ?? '');
   const dataTree = data && buildTree({ messages: data.messages });
   const messagesTree = dataTree?.length === 0 ? null : (dataTree ?? null);
+  const [authDialogOpen, setAuthDialogOpen] = useState(false);
 
   const [langcode, setLangcode] = useRecoilState(store.lang);
 
@@ -52,9 +52,10 @@ function SharedView() {
     onError: (error) => {
       const status = getResponseStatus(error);
       /** A 401 means the viewer isn't authenticated; the request interceptor
-       *  routes them through login (with a redirect back to this share), so a
-       *  generic error toast would be misleading noise before the redirect. */
+       *  lets share fork auth failures surface here so the viewer can choose how
+       *  to continue. */
       if (status === 401) {
+        setAuthDialogOpen(true);
         return;
       }
       showToast({
@@ -217,12 +218,64 @@ function SharedView() {
 
   return (
     <ShareContext.Provider value={{ isSharedConvo: true, shareId }}>
-      <div className="relative flex h-screen w-full overflow-hidden dark:bg-surface-secondary">
-        <main className="relative flex w-full grow overflow-hidden dark:bg-surface-secondary">
-          {artifactsContainer}
-        </main>
-      </div>
+      <>
+        <div className="relative flex h-screen w-full overflow-hidden dark:bg-surface-secondary">
+          <main className="relative flex w-full grow overflow-hidden dark:bg-surface-secondary">
+            {artifactsContainer}
+          </main>
+        </div>
+        <ShareAuthDialog
+          open={authDialogOpen}
+          onOpenChange={setAuthDialogOpen}
+          registrationUrl={config?.registrationUrl}
+        />
+      </>
     </ShareContext.Provider>
+  );
+}
+
+interface ShareAuthDialogProps {
+  open: boolean;
+  registrationUrl?: string;
+  onOpenChange: (open: boolean) => void;
+}
+
+function ShareAuthDialog({ open, registrationUrl, onOpenChange }: ShareAuthDialogProps) {
+  const localize = useLocalize();
+  const hasRegistrationUrl = typeof registrationUrl === 'string' && registrationUrl.length > 0;
+
+  const handleLogin = useCallback(() => {
+    window.location.href = apiBaseUrl() + buildLoginRedirectUrl();
+  }, []);
+
+  const handleRegister = useCallback(() => {
+    if (!hasRegistrationUrl) {
+      return;
+    }
+    window.open(registrationUrl, '_blank', 'noopener,noreferrer');
+  }, [hasRegistrationUrl, registrationUrl]);
+
+  return (
+    <OGDialog open={open} onOpenChange={onOpenChange}>
+      <OGDialogContent className="w-11/12 max-w-md" showCloseButton={true}>
+        <OGDialogHeader className="text-left">
+          <OGDialogTitle>{localize('com_ui_share_login_required_title')}</OGDialogTitle>
+        </OGDialogHeader>
+        <div className="flex flex-col gap-4 pt-2 text-sm text-text-primary">
+          <p className="text-text-secondary">{localize('com_ui_share_login_required')}</p>
+          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            {hasRegistrationUrl && (
+              <Button type="button" variant="outline" onClick={handleRegister}>
+                {localize('com_auth_create_account')}
+              </Button>
+            )}
+            <Button type="button" variant="submit" onClick={handleLogin}>
+              {localize('com_auth_login')}
+            </Button>
+          </div>
+        </div>
+      </OGDialogContent>
+    </OGDialog>
   );
 }
 

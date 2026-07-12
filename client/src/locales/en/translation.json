@@ -1707,6 +1707,8 @@
   "com_ui_share_files_description": "Images and files in this conversation won't be visible to viewers unless this is enabled.",
   "com_ui_share_files_refresh_note": "Refresh the link to apply this change — files are snapshotted when the link is refreshed.",
   "com_ui_share_link_to_chat": "Share link to chat",
+  "com_ui_share_login_required": "Create an account or sign in to continue this conversation with your own messages.",
+  "com_ui_share_login_required_title": "Sign in to continue",
   "com_ui_share_qr_code_description": "QR code for sharing this conversation link",
   "com_ui_share_update_message": "Your name, custom instructions, and any messages you add after sharing stay private.",
   "com_ui_share_var": "Share {{0}}",

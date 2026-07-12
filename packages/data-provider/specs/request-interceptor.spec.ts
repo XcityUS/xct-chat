@@ -360,8 +360,8 @@ describe('axios 401 interceptor — Authorization header guard', () => {
     expect(window.location.href).toBe('/login?redirect_to=%2Fshare%2Fabc123');
   });
 
-  it('redirects to login when the share fork refresh itself fails (stale session)', async () => {
-    expect.assertions(1);
+  it('surfaces the share fork 401 without redirecting when the refresh itself fails (stale session)', async () => {
+    expect.assertions(2);
     setTokenHeader(undefined);
 
     setWindowLocation({
@@ -381,13 +381,15 @@ describe('axios 401 interceptor — Authorization header guard', () => {
       config: { url: '/api/auth/refresh', method: 'post', headers: {} },
     });
 
+    let surfacedStatus: number | undefined;
     try {
       await axios.post('/api/share/abc123/fork');
-    } catch {
-      // expected rejection
+    } catch (error) {
+      surfacedStatus = (error as { response?: { status?: number } }).response?.status;
     }
 
-    expect(window.location.href).toBe('/login?redirect_to=%2Fshare%2Fabc123');
+    expect(surfacedStatus).toBe(401);
+    expect(window.location.href).toBe('http://localhost/share/abc123');
   });
 
   it('redirects to login with redirect_to when authenticated and refresh returns no token on share page', async () => {

@@ -141,7 +141,7 @@ shared key. Requires exporting `resolveUserVKey` / `xctKeyExchangeEnabled` from
 - `librechat.yaml` — `XCity AI` custom endpoint (tokenhub, `fetch: true`),
   agents capabilities, MCP servers wired **through the gateway only** (never
   direct — permissions + billing must flow through tokenhub).
-- `railway.env.template` — OpenID (auth.xcity.one), `ALLOW_REGISTRATION=false`,
+- `railway.env.template` — OpenID (auth.xcity.ai), `ALLOW_REGISTRATION=false`,
   LiteLLM + XCT key-exchange variables.
 - `OPENID-DEPLOYMENT-GUIDE.md`, `XCT-LITELLM-INTEGRATION.md`,
   `XCT-AUTH-CHAT-INTEGRATION.md` — deployment runbooks.

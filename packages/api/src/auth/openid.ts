@@ -2,8 +2,8 @@ import { logger } from '@librechat/data-schemas';
 import { ErrorTypes } from 'librechat-data-provider';
 import type { IUser, UserMethods } from '@librechat/data-schemas';
 import type { FilterQuery } from 'mongoose';
-import { isMetricsConfigured, recordOpenIDUserLookup } from '~/app/metrics';
 import type { OpenIDUserLookupResult } from '~/app/metrics';
+import { isMetricsConfigured, recordOpenIDUserLookup } from '~/app/metrics';
 
 export type OpenIdEmailClaims = {
   email?: unknown;
@@ -63,6 +63,20 @@ function isLegacyOpenIdIssuer(openidIssuer: string | undefined): boolean {
   return openidIssuer != null && loginIssuer != null && openidIssuer === loginIssuer;
 }
 
+function getConfiguredLegacyIssuers(openidIssuer: string | undefined): string[] {
+  if (!isLegacyOpenIdIssuer(openidIssuer)) return [];
+
+  const currentIssuer = normalizeOpenIdIssuer(process.env.OPENID_ISSUER);
+  return [
+    ...new Set(
+      (process.env.OPENID_LEGACY_ISSUERS ?? '')
+        .split(/[\s,]+/)
+        .map((issuer) => normalizeOpenIdIssuer(issuer))
+        .filter((issuer): issuer is string => issuer != null && issuer !== currentIssuer),
+    ),
+  ];
+}
+
 function hasOpenIdLookupValue(value: string | undefined): value is string {
   return typeof value === 'string' && value.length > 0;
 }
@@ -87,6 +101,18 @@ function getIssuerExactCondition(
   return { [field]: value, openidIssuer };
 }
 
+function getConfiguredLegacyIssuerConditions(
+  field: OpenIdLookupField,
+  value: string | undefined,
+  openidIssuer: string | undefined,
+): FilterQuery<IUser>[] {
+  if (!hasOpenIdLookupValue(value)) return [];
+  return getConfiguredLegacyIssuers(openidIssuer).map((legacyIssuer) => ({
+    [field]: value,
+    openidIssuer: legacyIssuer,
+  }));
+}
+
 function getLegacyIssuerConditions(
   field: OpenIdLookupField,
   value: string | undefined,
@@ -106,7 +132,11 @@ export function getIssuerBoundConditions(
 ): FilterQuery<IUser>[] {
   const exactCondition = getIssuerExactCondition(field, value, openidIssuer);
   if (!exactCondition) return [];
-  return [exactCondition, ...getLegacyIssuerConditions(field, value, openidIssuer)];
+  return [
+    exactCondition,
+    ...getConfiguredLegacyIssuerConditions(field, value, openidIssuer),
+    ...getLegacyIssuerConditions(field, value, openidIssuer),
+  ];
 }
 
 function getPrimaryLookupConditions(
@@ -121,6 +151,8 @@ function getPrimaryLookupConditions(
 
   return [
     ...exactConditions,
+    ...getConfiguredLegacyIssuerConditions('openidId', openidId, openidIssuer),
+    ...getConfiguredLegacyIssuerConditions('idOnTheSource', idOnTheSource, openidIssuer),
     ...getLegacyIssuerConditions('openidId', openidId, openidIssuer),
     ...getLegacyIssuerConditions('idOnTheSource', idOnTheSource, openidIssuer),
   ];
@@ -142,7 +174,11 @@ export function isUserIssuerAllowed(user: IUser, openidIssuer: string | undefine
   if (!openidIssuer) return true;
 
   const userIssuer = normalizeOpenIdIssuer(user.openidIssuer);
-  if (userIssuer) return userIssuer === openidIssuer;
+  if (userIssuer) {
+    return (
+      userIssuer === openidIssuer || getConfiguredLegacyIssuers(openidIssuer).includes(userIssuer)
+    );
+  }
 
   return isLegacyOpenIdIssuer(openidIssuer);
 }
@@ -162,7 +198,7 @@ function resolveIssuerBoundUser(
     return { user: null, error: ErrorTypes.AUTH_FAILED, migration: false };
   }
 
-  if (normalizedIssuer && !normalizeOpenIdIssuer(user.openidIssuer)) {
+  if (normalizedIssuer && normalizeOpenIdIssuer(user.openidIssuer) !== normalizedIssuer) {
     user.openidIssuer = normalizedIssuer;
     return { user, error: null, migration: true };
   }

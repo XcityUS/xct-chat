@@ -1,13 +1,13 @@
 /**
  * XCT-Auth Middleware
  * Unified authentication middleware for Xcity projects
- * Connects to XCT-Auth service on Railway (auth.xcity.one)
+ * Connects to XCT-Auth service on Railway (auth.xcity.ai)
  */
 
 const jwt = require('jsonwebtoken');
 const axios = require('axios');
 
-const XCT_AUTH_URL = process.env.XCT_AUTH_URL || 'https://auth.xcity.one';
+const XCT_AUTH_URL = process.env.XCT_AUTH_URL || 'https://auth.xcity.ai';
 const JWT_SECRET = process.env.JWT_SECRET || 'your-jwt-secret';
 
 /**

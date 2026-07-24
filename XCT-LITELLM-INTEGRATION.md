@@ -181,7 +181,7 @@ model is registered under a different video path, override
 **Yes.** The model is registered on tokenhub and accessible to the xct-chat
 virtual key (verified). xct-home surfaces gateway models via `ModelCatalog.astro`
 (built from `GET /v1/models` in `lib/litellm.ts`) and deep-links each into
-`chat.xcity.one/c/new?endpoint=XCity%20AI&model=…` — so once a user's plan
+`chat.xcity.ai/c/new?endpoint=XCity%20AI&model=…` — so once a user's plan
 `model_access` includes the seedance/seedream ids, they appear in xct-home's
 catalog and route into xct-chat automatically. Gating is per-plan `model_access`
 in xcity-litellm (a config/DB concern, not code). Recommended surface stays the

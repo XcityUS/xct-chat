@@ -70,11 +70,13 @@ describe('getOpenIdIssuer', () => {
 describe('findOpenIDUser', () => {
   let mockFindUser: jest.MockedFunction<UserMethods['findUser']>;
   const originalOpenIdIssuer = process.env.OPENID_ISSUER;
+  const originalLegacyOpenIdIssuers = process.env.OPENID_LEGACY_ISSUERS;
   const issuer = 'https://issuer.example.com';
 
   beforeEach(() => {
     mockFindUser = jest.fn();
     delete process.env.OPENID_ISSUER;
+    delete process.env.OPENID_LEGACY_ISSUERS;
     jest.clearAllMocks();
     (logger.warn as jest.Mock).mockClear();
     (logger.info as jest.Mock).mockClear();
@@ -83,9 +85,15 @@ describe('findOpenIDUser', () => {
   afterAll(() => {
     if (originalOpenIdIssuer == null) {
       delete process.env.OPENID_ISSUER;
-      return;
+    } else {
+      process.env.OPENID_ISSUER = originalOpenIdIssuer;
     }
-    process.env.OPENID_ISSUER = originalOpenIdIssuer;
+
+    if (originalLegacyOpenIdIssuers == null) {
+      delete process.env.OPENID_LEGACY_ISSUERS;
+    } else {
+      process.env.OPENID_LEGACY_ISSUERS = originalLegacyOpenIdIssuers;
+    }
   });
 
   describe('Primary condition searches', () => {
@@ -213,6 +221,42 @@ describe('findOpenIDUser', () => {
         user: mockUser,
         error: null,
         migration: false,
+      });
+    });
+
+    it('should find and migrate a user stored with a configured legacy issuer', async () => {
+      process.env.OPENID_ISSUER = 'https://auth.xcity.ai';
+      process.env.OPENID_LEGACY_ISSUERS = 'https://auth.xcity.one/, https://auth.xcity.ai';
+      const mockUser: IUser = {
+        _id: newId(),
+        provider: 'openid',
+        openidId: 'openid_123',
+        openidIssuer: 'https://auth.xcity.one',
+        email: 'user@example.com',
+        username: 'testuser',
+      } as IUser;
+
+      mockFindUser.mockResolvedValueOnce(null).mockResolvedValueOnce(mockUser);
+
+      const result = await findOpenIDUser({
+        openidId: 'openid_123',
+        openidIssuer: 'https://auth.xcity.ai',
+        findUser: mockFindUser,
+        email: 'user@example.com',
+      });
+
+      expect(mockFindUser).toHaveBeenNthCalledWith(1, {
+        openidId: 'openid_123',
+        openidIssuer: 'https://auth.xcity.ai',
+      });
+      expect(mockFindUser).toHaveBeenNthCalledWith(2, {
+        openidId: 'openid_123',
+        openidIssuer: 'https://auth.xcity.one',
+      });
+      expect(result).toEqual({
+        user: { ...mockUser, openidIssuer: 'https://auth.xcity.ai' },
+        error: null,
+        migration: true,
       });
     });
 

@@ -94,6 +94,7 @@ export default function useQueryParams({
         return;
       }
       let newPreset = removeUnavailableTools(_newPreset, availableTools);
+      clearModelForNonEphemeralAgent(newPreset);
       if (newPreset.spec != null && newPreset.spec !== '') {
         const startupConfig = queryClient.getQueryData<TStartupConfig>(startupConfigKey(true));
         const modelSpecs = startupConfig?.modelSpecs?.list ?? [];
@@ -256,6 +257,7 @@ export default function useQueryParams({
       delete queryParams.submit;
       delete queryParams[PROJECT_ID_SEARCH_PARAM];
       const validSettings = processValidSettings(queryParams);
+      clearModelForNonEphemeralAgent(validSettings);
 
       return { decodedPrompt, validSettings, shouldAutoSubmit };
     };

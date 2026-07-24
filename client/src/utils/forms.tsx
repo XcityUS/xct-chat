@@ -10,6 +10,9 @@ import {
 import type { Agent, TFile } from 'librechat-data-provider';
 import type { DropdownValueSetter, TAgentOption, ExtendedFile } from '~/common';
 
+const DEFAULT_AGENT_PROVIDER = 'XCity AI';
+const DEFAULT_AGENT_MODEL = 'deepseek-v4-flash';
+
 /**
  * Creates a Dropdown value setter that always passes a string value,
  * for when options (object with label/value fields) are used for the
@@ -50,8 +53,10 @@ export const createProviderOption = (provider: string) => ({
  **/
 export const getDefaultAgentFormValues = () => ({
   ...defaultAgentFormValues,
-  model: localStorage.getItem(LocalStorageKeys.LAST_AGENT_MODEL) ?? '',
-  provider: createProviderOption(localStorage.getItem(LocalStorageKeys.LAST_AGENT_PROVIDER) ?? ''),
+  model: localStorage.getItem(LocalStorageKeys.LAST_AGENT_MODEL) ?? DEFAULT_AGENT_MODEL,
+  provider: createProviderOption(
+    localStorage.getItem(LocalStorageKeys.LAST_AGENT_PROVIDER) ?? DEFAULT_AGENT_PROVIDER,
+  ),
   avatar_file: null,
   avatar_preview: '',
   avatar_action: null,

@@ -30,7 +30,7 @@ endpoints:
         # `default` is REQUIRED and must be non-empty even with fetch:true.
         # fetch:true pulls the live model list from /v1/models (filtered by the
         # key's model access), so this placeholder is replaced at runtime.
-        default: ['deepseek-v4-flash-260425']
+        default: ['deepseek-v4-flash']
         fetch: true
       titleConvo: true
       modelDisplayLabel: 'XCity AI'

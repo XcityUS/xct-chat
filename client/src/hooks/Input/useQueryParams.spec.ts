@@ -85,6 +85,7 @@ jest.mock('librechat-data-provider', () => {
     // Override schema to avoid complex validation in tests
     tQueryParamsSchema: {
       shape: {
+        agent_id: { parse: jest.fn((value) => value) },
         model: { parse: jest.fn((value) => value) },
         endpoint: { parse: jest.fn((value) => value) },
         temperature: { parse: jest.fn((value) => value) },
@@ -385,6 +386,61 @@ describe('useQueryParams', () => {
     );
     expect(mockHandleSubmit).toHaveBeenCalled();
     expect(mockSubmitMessage).toHaveBeenCalled();
+  });
+
+  it('should strip model from agent query params before creating a conversation', () => {
+    const mockSetValue = jest.fn();
+    const mockNewConversation = jest.fn();
+    const mockTextAreaRef = {
+      current: {
+        focus: jest.fn(),
+        setSelectionRange: jest.fn(),
+      } as unknown as HTMLTextAreaElement,
+    };
+
+    (useChatFormContext as jest.Mock).mockReturnValue({
+      setValue: mockSetValue,
+      getValues: jest.fn().mockReturnValue(''),
+      handleSubmit: jest.fn(),
+    });
+
+    (useChatContext as jest.Mock).mockReturnValue({
+      conversation: { model: null, endpoint: null },
+      newConversation: mockNewConversation,
+    });
+
+    (useQueryClient as jest.Mock).mockReturnValue({
+      getQueryData: jest.fn().mockImplementation((key) => {
+        const k = Array.isArray(key) ? key[0] : key;
+        if (k === 'startupConfig') {
+          return { modelSpecs: { list: [] } };
+        }
+        if (k === 'endpoints') {
+          return {};
+        }
+        return null;
+      }),
+    });
+
+    setUrlParams({ q: 'hello world', agent_id: 'agent-123', model: 'gpt-4' });
+
+    renderHook(() => useQueryParams({ textAreaRef: mockTextAreaRef }));
+
+    act(() => {
+      jest.advanceTimersByTime(100);
+    });
+
+    expect(mockSetValue).toHaveBeenCalledWith(
+      'text',
+      'hello world',
+      expect.objectContaining({ shouldValidate: true }),
+    );
+    expect(mockNewConversation).toHaveBeenCalled();
+
+    const [{ preset, template }] = mockNewConversation.mock.calls[0];
+    expect(preset.agent_id).toBe('agent-123');
+    expect(preset.model).toBeUndefined();
+    expect(template.model).toBeUndefined();
   });
 
   it('should submit after timeout if settings never get applied', () => {

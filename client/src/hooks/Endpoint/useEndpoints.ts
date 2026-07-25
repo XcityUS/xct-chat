@@ -204,6 +204,7 @@ export const useEndpoints = ({
 
   return {
     mappedEndpoints,
+    modelsConfig: modelsQuery.data,
     endpointRequiresUserKey,
   };
 };

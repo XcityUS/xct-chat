@@ -1102,3 +1102,97 @@ describe('fetchModels caching behavior', () => {
     expect(mockCacheSet).toHaveBeenCalled();
   });
 });
+
+describe('fetchModels XCT non-chat model filtering (XCT_FILTER_NON_CHAT_MODELS)', () => {
+  const ALL_IDS = ['deepseek-v4-flash', 'dreamina-seedance-2-0-260128', 'seedream-5-0-260128'];
+  const modelsResponse = {
+    data: { data: ALL_IDS.map((id) => ({ id })) },
+  };
+  const infoResponse = {
+    data: {
+      data: [
+        { model_name: 'deepseek-v4-flash', model_info: { mode: 'chat' } },
+        { model_name: 'dreamina-seedance-2-0-260128', model_info: { mode: 'video_generation' } },
+        { model_name: 'seedream-5-0-260128', model_info: { mode: 'image_generation' } },
+      ],
+    },
+  };
+
+  afterEach(() => {
+    delete process.env.XCT_FILTER_NON_CHAT_MODELS;
+    jest.clearAllMocks();
+  });
+
+  it('drops video/image models reported by /model/info when enabled', async () => {
+    process.env.XCT_FILTER_NON_CHAT_MODELS = 'true';
+    (axios.get as jest.Mock).mockImplementation((url: string) =>
+      url.includes('/model/info')
+        ? Promise.resolve(infoResponse)
+        : Promise.resolve(modelsResponse),
+    );
+
+    const models = await fetchModels({
+      apiKey: 'test-key',
+      baseURL: 'https://tokenhub.test/v1',
+      name: 'XCity AI',
+    });
+
+    expect(models).toEqual(['deepseek-v4-flash']);
+    expect(axios.get).toHaveBeenCalledWith(
+      'https://tokenhub.test/v1/model/info',
+      expect.anything(),
+    );
+  });
+
+  it('leaves the list untouched when the flag is off (no /model/info call)', async () => {
+    (axios.get as jest.Mock).mockResolvedValue(modelsResponse);
+
+    const models = await fetchModels({
+      apiKey: 'test-key',
+      baseURL: 'https://tokenhub.test/v1',
+      name: 'XCity AI',
+    });
+
+    expect(models).toEqual(ALL_IDS);
+    const infoCalls = (axios.get as jest.Mock).mock.calls.filter(([url]) =>
+      String(url).includes('/model/info'),
+    );
+    expect(infoCalls).toHaveLength(0);
+  });
+
+  it('fails open (unfiltered list) when /model/info errors', async () => {
+    process.env.XCT_FILTER_NON_CHAT_MODELS = 'true';
+    (axios.get as jest.Mock).mockImplementation((url: string) =>
+      url.includes('/model/info')
+        ? Promise.reject(new Error('info unavailable'))
+        : Promise.resolve(modelsResponse),
+    );
+
+    const models = await fetchModels({
+      apiKey: 'test-key',
+      baseURL: 'https://tokenhub.test/v1',
+      name: 'XCity AI',
+    });
+
+    expect(models).toEqual(ALL_IDS);
+  });
+
+  it('passes models through when /model/info reports no non-chat modes', async () => {
+    process.env.XCT_FILTER_NON_CHAT_MODELS = 'true';
+    (axios.get as jest.Mock).mockImplementation((url: string) =>
+      url.includes('/model/info')
+        ? Promise.resolve({
+            data: { data: [{ model_name: 'deepseek-v4-flash', model_info: { mode: 'chat' } }] },
+          })
+        : Promise.resolve(modelsResponse),
+    );
+
+    const models = await fetchModels({
+      apiKey: 'test-key',
+      baseURL: 'https://tokenhub.test/v1',
+      name: 'XCity AI',
+    });
+
+    expect(models).toEqual(ALL_IDS);
+  });
+});

@@ -113,6 +113,16 @@ Env (absent = tool disabled; upstream behavior unchanged): `VIDEO_GEN_API_KEY`
 (required to enable), `VIDEO_GEN_BASEURL`, `VIDEO_GEN_MODEL`, optional
 `VIDEO_GEN_CREATE_PATH`, `VIDEO_GEN_POLL_INTERVAL_MS`, `VIDEO_GEN_MAX_WAIT_MS`.
 
+Chat-list hygiene (`XCT_FILTER_NON_CHAT_MODELS=true`): the gateway's
+`/v1/models` includes the Seedance/Seedream generation models, so they showed
+up as selectable *chat* models — sending a message 500s at the provider
+(`ByteplusException`, chat completions on a video model). With the flag set,
+`packages/api` `fetchModels` reads each model's `mode` from
+`{baseURL}/model/info` (same virtual key) and drops non-chat modes
+(video/image/audio/embedding/…) from every fetched model list before caching.
+Fails open — if `/model/info` is unreachable the list passes through
+unfiltered. Absent flag = upstream behavior unchanged.
+
 **Per-user billing** (`handleTools.js`): the image (`image_gen_oai`) and video
 (`video_gen`) tools resolve the signed-in user's own gateway vkey via
 `resolveUserVKey` (the same XCT key exchange the chat endpoint uses, FORK-CHANGES

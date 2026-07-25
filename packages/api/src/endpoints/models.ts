@@ -145,6 +145,76 @@ export function splitAndTrim(input: string | null | undefined): string[] {
 }
 
 /**
+ * Generation modes (LiteLLM `/model/info` `mode` values) that cannot serve
+ * `/v1/chat/completions`. Selecting one as a chat model 500s at the provider
+ * (e.g. Seedance video models on BytePlus) — they are consumed through agent
+ * tools (`video_gen`, image tools) instead, so they must not be offered in
+ * chat model lists.
+ */
+const NON_CHAT_MODES = new Set([
+  'video_generation',
+  'image_generation',
+  'audio_speech',
+  'audio_transcription',
+  'embedding',
+  'rerank',
+  'moderation',
+  'ocr',
+]);
+
+/** XCT fork: chat-model filtering is opt-in — generic deployments are untouched. */
+function filterNonChatModelsEnabled(): boolean {
+  return String(process.env.XCT_FILTER_NON_CHAT_MODELS || '').toLowerCase() === 'true';
+}
+
+/**
+ * XCT fork: drop non-chat models (video/image/audio/…) from a fetched model
+ * list by asking the LiteLLM gateway for each model's `mode` via
+ * `{baseURL}/model/info` (readable with the same virtual key; LiteLLM mounts
+ * it under /v1 too). Models the info call doesn't cover — and the whole list
+ * when the call fails — pass through unchanged (fail-open): a stale extra
+ * model is a recoverable UX bug, an empty chat dropdown is an outage.
+ */
+async function filterNonChatModels(
+  models: string[],
+  baseURL: string,
+  requestOptions: AxiosRequestConfig,
+): Promise<string[]> {
+  if (!filterNonChatModelsEnabled() || models.length === 0) {
+    return models;
+  }
+  try {
+    const url = `${baseURL.replace(/\/+$/, '')}/model/info`;
+    const res = await axios.get<{
+      data?: Array<{ model_name?: string; model_info?: { mode?: string | null } }>;
+    }>(url, requestOptions);
+    const entries = Array.isArray(res.data?.data) ? res.data.data : [];
+    if (entries.length === 0) {
+      return models;
+    }
+    const nonChat = new Set(
+      entries
+        .filter((e) => e.model_name && NON_CHAT_MODES.has(e.model_info?.mode ?? ''))
+        .map((e) => e.model_name as string),
+    );
+    if (nonChat.size === 0) {
+      return models;
+    }
+    const filtered = models.filter((id) => !nonChat.has(id));
+    logger.debug(
+      `[fetchModels] XCT_FILTER_NON_CHAT_MODELS dropped ${models.length - filtered.length} non-chat model(s)`,
+    );
+    return filtered;
+  } catch (error) {
+    logAxiosError({
+      message: 'Failed to fetch /model/info for non-chat model filtering; list left unfiltered',
+      error: error as Error,
+    });
+    return models;
+  }
+}
+
+/**
  * Fetches models from the specified base API path or Azure, based on the provided configuration.
  *
  * @param params - The parameters for fetching the models.
@@ -297,6 +367,8 @@ export async function fetchModels({
       }
     }
     models = input.data.map((item: { id: string }) => item.id);
+    // Filter BEFORE the cache write below so cached lists are also chat-only.
+    models = await filterNonChatModels(models, baseURL ?? '', options);
   } catch (error) {
     const logMessage = `Failed to fetch models from ${azure ? 'Azure ' : ''}${name} API`;
     logAxiosError({ message: logMessage, error: error as Error });

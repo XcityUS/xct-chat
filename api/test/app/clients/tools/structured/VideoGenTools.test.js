@@ -73,6 +73,35 @@ describe('VideoGenTool', () => {
     });
   });
 
+  it('defaults to Seedance 1.5 Pro when VIDEO_GEN_MODEL is unset', () => {
+    delete process.env.VIDEO_GEN_MODEL;
+    const tool = makeTool();
+    expect(tool.model).toBe('seedance-1-5-pro-251215');
+  });
+
+  it('passes Seedance provider params through and prefers ratio over legacy size', () => {
+    const tool = makeTool();
+    const payload = tool.buildPayload({
+      prompt: 'a cat surfing',
+      seconds: 8,
+      size: '1280x720',
+      ratio: '9:16',
+      resolution: '1080p',
+      generate_audio: false,
+      camera_fixed: true,
+    });
+    expect(payload).toEqual({
+      model: 'dreamina-seedance-2-0-260128',
+      prompt: 'a cat surfing',
+      seconds: 8,
+      ratio: '9:16',
+      resolution: '1080p',
+      generate_audio: false,
+      camera_fixed: true,
+    });
+    expect(payload.size).toBeUndefined();
+  });
+
   it('returns a VIDEO_URL artifact for a synchronous url response', async () => {
     postSpy.mockResolvedValueOnce({
       data: { data: [{ url: 'https://cdn.test/clip.mp4' }] },

@@ -16,12 +16,33 @@ const videoGenJsonSchema = {
     seconds: {
       type: 'number',
       description:
-        'Desired length of the clip in seconds (e.g. 5). Optional; the model applies its default when omitted.',
+        'Clip length in seconds. Seedance models accept 4-12; use 5 when the user has no preference.',
+    },
+    ratio: {
+      type: 'string',
+      enum: ['16:9', '9:16', '1:1', '4:3', '21:9', 'adaptive'],
+      description:
+        'Aspect ratio of the clip. "16:9" landscape (default), "9:16" portrait/mobile, "1:1" square, "21:9" cinematic; "adaptive" keeps the reference image\'s ratio (image-to-video only).',
+    },
+    resolution: {
+      type: 'string',
+      enum: ['480p', '720p', '1080p'],
+      description:
+        'Output resolution. Higher costs more per second; use "720p" when the user has no preference.',
+    },
+    generate_audio: {
+      type: 'boolean',
+      description:
+        'Whether to generate synchronized audio with the video (supported by Seedance 1.5+). Omit to use the model default.',
+    },
+    camera_fixed: {
+      type: 'boolean',
+      description: 'Lock the camera position (no camera movement). Optional.',
     },
     size: {
       type: 'string',
       description:
-        'Target frame size in pixels, e.g. "1280x720" (landscape), "720x1280" (portrait), or "1024x1024" (square). Optional.',
+        'Legacy pixel frame size, e.g. "1280x720". Prefer `ratio` + `resolution`; only one of size/ratio is honored.',
     },
     input_reference: {
       type: 'string',
@@ -153,7 +174,9 @@ class VideoGenTool extends Tool {
     }
 
     this.apiKey = fields.VIDEO_GEN_API_KEY ?? this.getApiKey();
-    this.model = process.env.VIDEO_GEN_MODEL || 'dreamina-seedance-2-0-260128';
+    // Default: Seedance 1.5 Pro — native audio, 4-12s, ~1/3 the per-second
+    // cost of Seedance 2.0. Override per deployment via VIDEO_GEN_MODEL.
+    this.model = process.env.VIDEO_GEN_MODEL || 'seedance-1-5-pro-251215';
     this.baseUrl = (process.env.VIDEO_GEN_BASEURL || 'https://tokenhub.xcity.one/v1').replace(
       /\/+$/,
       '',
@@ -167,7 +190,7 @@ class VideoGenTool extends Tool {
     this.description =
       'Generate a short video from a text prompt (optionally animating a reference image). Each call produces one video clip. Use for requests to create, animate, or render a video/clip/motion scene.';
     this.description_for_model =
-      "// Turn the user's idea into a vivid, specific video prompt: describe subject, setting, motion, camera movement, lighting, and mood in 2-4 sentences. Provide `input_reference` (an image URL) to animate an existing image (image-to-video). Generation can take up to a few minutes.";
+      "// Turn the user's idea into a vivid, specific video prompt: describe subject, setting, motion, camera movement, lighting, and mood in 2-4 sentences. Before generating, confirm the user's preferred aspect ratio (画幅), resolution (分辨率), and duration in seconds (时长) if they haven't specified them — otherwise default to ratio 16:9, resolution 720p, 5 seconds. Provide `input_reference` (an image URL) to animate an existing image (image-to-video; pair with ratio \"adaptive\" to keep the image's framing). Set `generate_audio` false if the user wants a silent clip. Generation can take up to a few minutes.";
     this.schema = videoGenJsonSchema;
   }
 
@@ -238,16 +261,30 @@ class VideoGenTool extends Tool {
     });
   }
 
-  buildPayload({ prompt, seconds, size, input_reference }) {
+  buildPayload({ prompt, seconds, size, ratio, resolution, generate_audio, camera_fixed, input_reference }) {
     // OpenAI-compatible video-create params (LiteLLM /v1/videos normalizes these
     // to the provider, e.g. BytePlus/Seedance: seconds→duration, size→ratio,
-    // input_reference→image content part).
+    // input_reference→image content part). Provider-specific params (ratio,
+    // resolution, generate_audio, camera_fixed) pass through the gateway
+    // verbatim; when both are present, provider `ratio` wins over legacy `size`.
     const payload = { model: this.model, prompt };
     if (seconds != null) {
       payload.seconds = seconds;
     }
-    if (size) {
+    if (size && !ratio) {
       payload.size = size;
+    }
+    if (ratio) {
+      payload.ratio = ratio;
+    }
+    if (resolution) {
+      payload.resolution = resolution;
+    }
+    if (generate_audio != null) {
+      payload.generate_audio = generate_audio;
+    }
+    if (camera_fixed != null) {
+      payload.camera_fixed = camera_fixed;
     }
     if (input_reference) {
       payload.input_reference = input_reference;

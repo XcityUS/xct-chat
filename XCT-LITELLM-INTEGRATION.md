@@ -160,7 +160,7 @@ attachment. Enable it with:
 ```bash
 VIDEO_GEN_API_KEY=${LITELLM_API_KEY}
 VIDEO_GEN_BASEURL=https://tokenhub.xcity.one/v1
-VIDEO_GEN_MODEL=dreamina-seedance-2-0-260128
+VIDEO_GEN_MODEL=seedance-1-5-pro-251215   # default; dreamina-seedance-2-0-260128 for max quality
 ```
 
 **Verified contract** (from the LiteLLM source + a live probe of tokenhub):

@@ -123,13 +123,17 @@ export function filterModels(
 export function filterChatModelSpecs(
   modelSpecs: TModelSpec[],
   modelsConfig: TModelsConfig | undefined,
-  endpoint: string | null | undefined,
-  agent_id: string | null | undefined,
+  _endpoint: string | null | undefined,
+  _agent_id: string | null | undefined,
 ): TModelSpec[] {
   return modelSpecs.filter((spec) => {
     const specEndpoint = spec.preset?.endpoint;
     if (isAgentsEndpoint(specEndpoint)) {
-      return isAgentsEndpoint(endpoint) && !!agent_id && spec.preset?.agent_id === agent_id;
+      // Agent specs reaching this point are already permission-filtered
+      // upstream (ModelSelectorContext keeps only agent_ids present in
+      // agentsMap) — keep them selectable at all times so users can start
+      // an agent conversation straight from the picker.
+      return true;
     }
 
     if (isAssistantsEndpoint(specEndpoint)) {
@@ -158,26 +162,25 @@ export function filterChatMappedEndpoints(
       return [mappedEndpoint];
     }
 
-    if (!hasSelectedAgent) {
+    // The Agents section stays in the picker with the user's accessible
+    // agents (own/shared — the list query's permission level governs what
+    // lands here; with interface.marketplace.use it is the user's own
+    // agents rather than every public one).
+    const models = mappedEndpoint.models ?? [];
+
+    // A deep-linked agent outside that list (e.g. a public marketplace
+    // agent opened via ?agent_id=…) is injected so the active selection is
+    // visible and re-selectable; its display name resolves via agentsMap.
+    if (hasSelectedAgent && agent_id && !models.some((model) => model.name === agent_id)) {
+      return [{ ...mappedEndpoint, models: [...models, { name: agent_id }] }];
+    }
+
+    // Nothing to pick and nothing selected — hide the empty section.
+    if (models.length === 0 && !hasSelectedAgent) {
       return [];
     }
 
-    const selectedAgent = mappedEndpoint.models?.find((model) => model.name === agent_id);
-    if (!selectedAgent) {
-      return [];
-    }
-
-    const selectedAgentName = mappedEndpoint.agentNames?.[agent_id];
-    const selectedAgentIcon = mappedEndpoint.modelIcons?.[agent_id];
-    return [
-      {
-        ...mappedEndpoint,
-        models: [selectedAgent],
-        agentNames: selectedAgentName != null ? { [agent_id]: selectedAgentName } : undefined,
-        modelIcons:
-          mappedEndpoint.modelIcons != null ? { [agent_id]: selectedAgentIcon } : undefined,
-      },
-    ];
+    return [mappedEndpoint];
   });
 }
 

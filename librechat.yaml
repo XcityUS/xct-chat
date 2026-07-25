@@ -74,6 +74,12 @@ interface:
     # links from xct-home.
     share: true
     public: true
+  # In-chat Agent Marketplace. Also flips the chat picker's agent list to
+  # EDIT permission (the user's OWN agents) instead of VIEW — without this,
+  # every publicly published agent (250+) floods the model selector, which
+  # is what originally forced hiding the Agents section (PR #39).
+  marketplace:
+    use: true
   sharedLinks:
     create: true
     share: true

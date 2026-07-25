@@ -14,7 +14,7 @@ import { useAgentsMapContext, useAssistantsMapContext, useLiveAnnouncer } from '
 import { useGetEndpointsQuery, useListAgentsQuery } from '~/data-provider';
 import { useModelSelectorChatContext } from './ModelSelectorChatContext';
 import useSelectMention from '~/hooks/Input/useSelectMention';
-import { filterItems } from './utils';
+import { filterChatMappedEndpoints, filterChatModelSpecs, filterItems } from './utils';
 
 type ModelSelectorContextType = {
   // State
@@ -89,12 +89,20 @@ export function ModelSelectorProvider({ children, startupConfig }: ModelSelector
     },
   );
 
-  const { mappedEndpoints, endpointRequiresUserKey } = useEndpoints({
+  const { mappedEndpoints, modelsConfig, endpointRequiresUserKey } = useEndpoints({
     agents,
     assistantsMap,
     startupConfig,
     endpointsConfig,
   });
+  const visibleModelSpecs = useMemo(
+    () => filterChatModelSpecs(modelSpecs, modelsConfig, endpoint, agent_id),
+    [agent_id, endpoint, modelSpecs, modelsConfig],
+  );
+  const visibleMappedEndpoints = useMemo(
+    () => filterChatMappedEndpoints(mappedEndpoints, endpoint, agent_id),
+    [agent_id, endpoint, mappedEndpoints],
+  );
 
   const getModelDisplayName = useCallback(
     (endpoint: Endpoint, model: string): string => {
@@ -113,7 +121,7 @@ export function ModelSelectorProvider({ children, startupConfig }: ModelSelector
 
   const { onSelectEndpoint, onSelectSpec } = useSelectMention({
     // presets,
-    modelSpecs,
+    modelSpecs: visibleModelSpecs,
     getConversation,
     assistantsMap,
     endpointsConfig,
@@ -160,9 +168,9 @@ export function ModelSelectorProvider({ children, startupConfig }: ModelSelector
     if (!searchValue) {
       return null;
     }
-    const allItems = [...modelSpecs, ...mappedEndpoints];
+    const allItems = [...visibleModelSpecs, ...visibleMappedEndpoints];
     return filterItems(allItems, searchValue, agentsMap, assistantsMap || {}, localize);
-  }, [searchValue, modelSpecs, mappedEndpoints, agentsMap, assistantsMap, localize]);
+  }, [searchValue, visibleModelSpecs, visibleMappedEndpoints, agentsMap, assistantsMap, localize]);
 
   const setDebouncedSearchValue = useMemo(
     () =>
@@ -247,9 +255,9 @@ export function ModelSelectorProvider({ children, startupConfig }: ModelSelector
       selectedValues,
       endpointSearchValues,
       agentsMap,
-      modelSpecs,
+      modelSpecs: visibleModelSpecs,
       assistantsMap,
-      mappedEndpoints,
+      mappedEndpoints: visibleMappedEndpoints,
       endpointsConfig,
       handleSelectSpec,
       handleSelectModel,
@@ -266,9 +274,9 @@ export function ModelSelectorProvider({ children, startupConfig }: ModelSelector
       selectedValues,
       endpointSearchValues,
       agentsMap,
-      modelSpecs,
+      visibleModelSpecs,
       assistantsMap,
-      mappedEndpoints,
+      visibleMappedEndpoints,
       endpointsConfig,
       handleSelectSpec,
       handleSelectModel,

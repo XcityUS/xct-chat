@@ -4,11 +4,12 @@ import { isAgentsEndpoint, isAssistantsEndpoint } from 'librechat-data-provider'
 import type {
   TModelSpec,
   TAgentsMap,
+  TModelsConfig,
   TAssistantsMap,
   TEndpointsConfig,
 } from 'librechat-data-provider';
 import type { useLocalize } from '~/hooks';
-import SpecIcon from '~/components/Chat/Menus/Endpoints/components/SpecIcon';
+import SpecIcon from './components/SpecIcon';
 import { Endpoint, SelectedValues } from '~/common';
 
 export function filterItems<
@@ -116,6 +117,67 @@ export function filterModels(
     }
 
     return modelName.toLowerCase().includes(searchTermLower);
+  });
+}
+
+export function filterChatModelSpecs(
+  modelSpecs: TModelSpec[],
+  modelsConfig: TModelsConfig | undefined,
+  endpoint: string | null | undefined,
+  agent_id: string | null | undefined,
+): TModelSpec[] {
+  return modelSpecs.filter((spec) => {
+    const specEndpoint = spec.preset?.endpoint;
+    if (isAgentsEndpoint(specEndpoint)) {
+      return isAgentsEndpoint(endpoint) && !!agent_id && spec.preset?.agent_id === agent_id;
+    }
+
+    if (isAssistantsEndpoint(specEndpoint)) {
+      return true;
+    }
+
+    if (!specEndpoint) {
+      return false;
+    }
+
+    const availableModels = modelsConfig?.[specEndpoint] ?? [];
+    const specModel = spec.preset?.model;
+    return availableModels.length > 0 && (!specModel || availableModels.includes(specModel));
+  });
+}
+
+export function filterChatMappedEndpoints(
+  mappedEndpoints: Endpoint[],
+  endpoint: string | null | undefined,
+  agent_id: string | null | undefined,
+): Endpoint[] {
+  const hasSelectedAgent = isAgentsEndpoint(endpoint) && !!agent_id;
+
+  return mappedEndpoints.flatMap((mappedEndpoint) => {
+    if (!isAgentsEndpoint(mappedEndpoint.value)) {
+      return [mappedEndpoint];
+    }
+
+    if (!hasSelectedAgent) {
+      return [];
+    }
+
+    const selectedAgent = mappedEndpoint.models?.find((model) => model.name === agent_id);
+    if (!selectedAgent) {
+      return [];
+    }
+
+    const selectedAgentName = mappedEndpoint.agentNames?.[agent_id];
+    const selectedAgentIcon = mappedEndpoint.modelIcons?.[agent_id];
+    return [
+      {
+        ...mappedEndpoint,
+        models: [selectedAgent],
+        agentNames: selectedAgentName != null ? { [agent_id]: selectedAgentName } : undefined,
+        modelIcons:
+          mappedEndpoint.modelIcons != null ? { [agent_id]: selectedAgentIcon } : undefined,
+      },
+    ];
   });
 }
 

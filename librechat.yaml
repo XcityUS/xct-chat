@@ -7,7 +7,10 @@ version: 1.3.12
 # it must be present in each deployment (e.g. mounted/created on Railway).
 #
 # Content-creation capabilities (single gateway = LiteLLM):
-#   - Chat   : custom endpoint below (fetch:true, all LiteLLM models)        [done]
+#   - Chat   : custom endpoint below (fetch:true, all LiteLLM models; with
+#              XCT_FILTER_NON_CHAT_MODELS=true the fetch drops video/image
+#              generation models — they 500 as chat models and are consumed
+#              via the agent tools below instead)                            [done]
 #   - Image  : built-in "OpenAI Image Tools" agent tool, configured by the
 #              IMAGE_GEN_OAI_* env vars (see railway.env.template) which point
 #              at https://tokenhub.xcity.one/v1. Enabled via the `tools`

@@ -1104,7 +1104,15 @@ describe('fetchModels caching behavior', () => {
 });
 
 describe('fetchModels XCT non-chat model filtering (XCT_FILTER_NON_CHAT_MODELS)', () => {
-  const ALL_IDS = ['deepseek-v4-flash', 'dreamina-seedance-2-0-260128', 'seedream-5-0-260128'];
+  const ALL_IDS = [
+    'deepseek-v4-flash',
+    'dreamina-seedance-2-0-260128',
+    'seedream-5-0-260128',
+    'recraft-image-edit',
+    'o3-responses-only',
+    'legacy-chat-compatible',
+    'missing-mode',
+  ];
   const modelsResponse = {
     data: { data: ALL_IDS.map((id) => ({ id })) },
   };
@@ -1114,21 +1122,26 @@ describe('fetchModels XCT non-chat model filtering (XCT_FILTER_NON_CHAT_MODELS)'
         { model_name: 'deepseek-v4-flash', model_info: { mode: 'chat' } },
         { model_name: 'dreamina-seedance-2-0-260128', model_info: { mode: 'video_generation' } },
         { model_name: 'seedream-5-0-260128', model_info: { mode: 'image_generation' } },
+        { model_name: 'recraft-image-edit', model_info: { mode: 'image_edit' } },
+        { model_name: 'o3-responses-only', model_info: { mode: 'responses' } },
+        {
+          model_name: 'legacy-chat-compatible',
+          model_info: { mode: 'completion', supported_endpoints: ['/v1/chat/completions'] },
+        },
+        { model_name: 'missing-mode', model_info: {} },
       ],
     },
   };
 
   afterEach(() => {
     delete process.env.XCT_FILTER_NON_CHAT_MODELS;
+    delete process.env.XCT_ENDPOINT_NAME;
     jest.clearAllMocks();
   });
 
-  it('drops video/image models reported by /model/info when enabled', async () => {
-    process.env.XCT_FILTER_NON_CHAT_MODELS = 'true';
+  it('drops non-chat models reported by /model/info for XCity AI by default', async () => {
     (axios.get as jest.Mock).mockImplementation((url: string) =>
-      url.includes('/model/info')
-        ? Promise.resolve(infoResponse)
-        : Promise.resolve(modelsResponse),
+      url.includes('/model/info') ? Promise.resolve(infoResponse) : Promise.resolve(modelsResponse),
     );
 
     const models = await fetchModels({
@@ -1137,14 +1150,31 @@ describe('fetchModels XCT non-chat model filtering (XCT_FILTER_NON_CHAT_MODELS)'
       name: 'XCity AI',
     });
 
-    expect(models).toEqual(['deepseek-v4-flash']);
+    expect(models).toEqual(['deepseek-v4-flash', 'legacy-chat-compatible', 'missing-mode']);
     expect(axios.get).toHaveBeenCalledWith(
       'https://tokenhub.test/v1/model/info',
       expect.anything(),
     );
   });
 
-  it('leaves the list untouched when the flag is off (no /model/info call)', async () => {
+  it('leaves non-XCity lists untouched when the flag is unset (no /model/info call)', async () => {
+    (axios.get as jest.Mock).mockResolvedValue(modelsResponse);
+
+    const models = await fetchModels({
+      apiKey: 'test-key',
+      baseURL: 'https://tokenhub.test/v1',
+      name: 'Other API',
+    });
+
+    expect(models).toEqual(ALL_IDS);
+    const infoCalls = (axios.get as jest.Mock).mock.calls.filter(([url]) =>
+      String(url).includes('/model/info'),
+    );
+    expect(infoCalls).toHaveLength(0);
+  });
+
+  it('respects an explicit false override for XCity AI', async () => {
+    process.env.XCT_FILTER_NON_CHAT_MODELS = 'false';
     (axios.get as jest.Mock).mockResolvedValue(modelsResponse);
 
     const models = await fetchModels({
@@ -1160,8 +1190,37 @@ describe('fetchModels XCT non-chat model filtering (XCT_FILTER_NON_CHAT_MODELS)'
     expect(infoCalls).toHaveLength(0);
   });
 
-  it('fails open (unfiltered list) when /model/info errors', async () => {
+  it('can opt non-XCity endpoints into the same filtering', async () => {
     process.env.XCT_FILTER_NON_CHAT_MODELS = 'true';
+    (axios.get as jest.Mock).mockImplementation((url: string) =>
+      url.includes('/model/info') ? Promise.resolve(infoResponse) : Promise.resolve(modelsResponse),
+    );
+
+    const models = await fetchModels({
+      apiKey: 'test-key',
+      baseURL: 'https://api.test/v1',
+      name: 'Other API',
+    });
+
+    expect(models).toEqual(['deepseek-v4-flash', 'legacy-chat-compatible', 'missing-mode']);
+  });
+
+  it('enables filtering for a renamed XCity endpoint', async () => {
+    process.env.XCT_ENDPOINT_NAME = 'City Chat';
+    (axios.get as jest.Mock).mockImplementation((url: string) =>
+      url.includes('/model/info') ? Promise.resolve(infoResponse) : Promise.resolve(modelsResponse),
+    );
+
+    const models = await fetchModels({
+      apiKey: 'test-key',
+      baseURL: 'https://tokenhub.test/v1',
+      name: 'City Chat',
+    });
+
+    expect(models).toEqual(['deepseek-v4-flash', 'legacy-chat-compatible', 'missing-mode']);
+  });
+
+  it('fails open (unfiltered list) when /model/info errors', async () => {
     (axios.get as jest.Mock).mockImplementation((url: string) =>
       url.includes('/model/info')
         ? Promise.reject(new Error('info unavailable'))

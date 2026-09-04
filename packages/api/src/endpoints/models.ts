@@ -144,49 +144,103 @@ export function splitAndTrim(input: string | null | undefined): string[] {
     .filter(Boolean);
 }
 
-/**
- * Generation modes (LiteLLM `/model/info` `mode` values) that cannot serve
- * `/v1/chat/completions`. Selecting one as a chat model 500s at the provider
- * (e.g. Seedance video models on BytePlus) — they are consumed through agent
- * tools (`video_gen`, image tools) instead, so they must not be offered in
- * chat model lists.
- */
-const NON_CHAT_MODES = new Set([
-  'video_generation',
-  'image_generation',
-  'audio_speech',
-  'audio_transcription',
-  'embedding',
-  'rerank',
-  'moderation',
-  'ocr',
-]);
+const CHAT_COMPLETION_ENDPOINTS = new Set(['/chat/completions', '/v1/chat/completions']);
+const CHAT_MODEL_MODES = new Set(['chat']);
+const TRUE_ENV_VALUES = new Set(['1', 'true', 'yes', 'on']);
+const FALSE_ENV_VALUES = new Set(['0', 'false', 'no', 'off']);
 
-/** XCT fork: chat-model filtering is opt-in — generic deployments are untouched. */
-function filterNonChatModelsEnabled(): boolean {
-  return String(process.env.XCT_FILTER_NON_CHAT_MODELS || '').toLowerCase() === 'true';
+type LiteLLMModelInfo = {
+  mode?: string | null;
+  supported_endpoints?: string[] | null;
+};
+
+type LiteLLMModelInfoEntry = {
+  model_name?: string;
+  model_info?: LiteLLMModelInfo | null;
+};
+
+function normalizeFilterEnvValue(value: string | undefined): string {
+  return String(value || '')
+    .trim()
+    .toLowerCase();
+}
+
+function isXctEndpoint(name: string, baseURL: string): boolean {
+  if (name.trim().toLowerCase() === (process.env.XCT_ENDPOINT_NAME || 'XCity AI').toLowerCase()) {
+    return true;
+  }
+
+  try {
+    return new URL(baseURL).hostname === 'tokenhub.xcity.one';
+  } catch {
+    return false;
+  }
+}
+
+function normalizeEndpointPath(endpoint: string): string {
+  const fallback = `/${endpoint.replace(/^\/+/, '').replace(/\/+$/, '')}`.toLowerCase();
+  try {
+    return `/${new URL(endpoint).pathname.replace(/^\/+/, '').replace(/\/+$/, '')}`.toLowerCase();
+  } catch {
+    return fallback;
+  }
+}
+
+/**
+ * XCT fork: XCity chat-model filtering defaults on. Generic deployments remain
+ * unchanged unless they explicitly opt in, and XCity can still be disabled for
+ * emergency rollback with XCT_FILTER_NON_CHAT_MODELS=false.
+ */
+function filterNonChatModelsEnabled(name: string, baseURL: string): boolean {
+  const configured = normalizeFilterEnvValue(process.env.XCT_FILTER_NON_CHAT_MODELS);
+  if (FALSE_ENV_VALUES.has(configured)) {
+    return false;
+  }
+  if (TRUE_ENV_VALUES.has(configured)) {
+    return true;
+  }
+  return isXctEndpoint(name, baseURL);
+}
+
+function modelInfoSupportsChatCompletions(modelInfo?: LiteLLMModelInfo | null): boolean {
+  const endpoints = modelInfo?.supported_endpoints;
+  if (Array.isArray(endpoints) && endpoints.length > 0) {
+    return endpoints.some((endpoint) =>
+      CHAT_COMPLETION_ENDPOINTS.has(normalizeEndpointPath(endpoint)),
+    );
+  }
+
+  const mode = modelInfo?.mode;
+  if (!mode) {
+    return true;
+  }
+
+  return CHAT_MODEL_MODES.has(mode);
 }
 
 /**
  * XCT fork: drop non-chat models (video/image/audio/…) from a fetched model
  * list by asking the LiteLLM gateway for each model's `mode` via
  * `{baseURL}/model/info` (readable with the same virtual key; LiteLLM mounts
- * it under /v1 too). Models the info call doesn't cover — and the whole list
- * when the call fails — pass through unchanged (fail-open): a stale extra
- * model is a recoverable UX bug, an empty chat dropdown is an outage.
+ * it under /v1 too). If `supported_endpoints` is present it is authoritative;
+ * otherwise only `mode: chat` is treated as chat-capable. Models the info call
+ * doesn't cover — and the whole list when the call fails — pass through
+ * unchanged (fail-open): a stale extra model is a recoverable UX bug, an empty
+ * chat dropdown is an outage.
  */
 async function filterNonChatModels(
   models: string[],
   baseURL: string,
+  name: string,
   requestOptions: AxiosRequestConfig,
 ): Promise<string[]> {
-  if (!filterNonChatModelsEnabled() || models.length === 0) {
+  if (!filterNonChatModelsEnabled(name, baseURL) || models.length === 0) {
     return models;
   }
   try {
     const url = `${baseURL.replace(/\/+$/, '')}/model/info`;
     const res = await axios.get<{
-      data?: Array<{ model_name?: string; model_info?: { mode?: string | null } }>;
+      data?: LiteLLMModelInfoEntry[];
     }>(url, requestOptions);
     const entries = Array.isArray(res.data?.data) ? res.data.data : [];
     if (entries.length === 0) {
@@ -194,7 +248,7 @@ async function filterNonChatModels(
     }
     const nonChat = new Set(
       entries
-        .filter((e) => e.model_name && NON_CHAT_MODES.has(e.model_info?.mode ?? ''))
+        .filter((e) => e.model_name && !modelInfoSupportsChatCompletions(e.model_info))
         .map((e) => e.model_name as string),
     );
     if (nonChat.size === 0) {
@@ -368,7 +422,7 @@ export async function fetchModels({
     }
     models = input.data.map((item: { id: string }) => item.id);
     // Filter BEFORE the cache write below so cached lists are also chat-only.
-    models = await filterNonChatModels(models, baseURL ?? '', options);
+    models = await filterNonChatModels(models, baseURL ?? '', name, options);
   } catch (error) {
     const logMessage = `Failed to fetch models from ${azure ? 'Azure ' : ''}${name} API`;
     logAxiosError({ message: logMessage, error: error as Error });

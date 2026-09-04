@@ -67,8 +67,9 @@ For local development:
 
 After deployment, verify the integration:
 
-1. **Check model list**: Open xct-chat and check if all LiteLLM models appear in the model selector under "XCity AI"
-   - Should see models from: Tencent, OpenAI, Anthropic, Google, etc.
+1. **Check model list**: Open xct-chat and check that only LiteLLM models compatible with chat completions appear in the model selector under "XCity AI"
+   - Should see text chat models from: Tencent, OpenAI, Anthropic, Google, etc.
+   - Should not see media-only models such as Seedance video or Seedream image models; route media workflows through studio.xcity.ai.
 
 2. **Test a conversation**: Select any model and send a test message
    - Response should be successful

@@ -2,16 +2,34 @@ const { logger } = require('@librechat/data-schemas');
 const { loadDefaultModels, loadConfigModels } = require('~/server/services/Config');
 const { fetchAgentModelIds } = require('~/server/services/litellmSource');
 
+const FALSE_ENV_VALUES = new Set(['0', 'false', 'no', 'off']);
+
 // Custom endpoint (librechat.yaml `endpoints.custom[].name`) that fronts the
-// LiteLLM gateway. LiteLLM A2A agents are not returned by `/v1/models`, so they
-// must be appended here for deep-linked `a2a/*` models to be selectable.
+// LiteLLM gateway.
 const AGENTS_ENDPOINT_NAME = process.env.LITELLM_AGENTS_ENDPOINT_NAME || 'XCity AI';
+
+function normalizeEnvValue(value) {
+  return String(value || '')
+    .trim()
+    .replace(/^['"]|['"]$/g, '')
+    .toLowerCase();
+}
+
+function chatModelFilterDisabled() {
+  return FALSE_ENV_VALUES.has(normalizeEnvValue(process.env.XCT_FILTER_NON_CHAT_MODELS));
+}
 
 /**
  * Append LiteLLM A2A agents as `a2a/<agent_name>` models to the XCity AI
- * endpoint. Fail-safe: any problem leaves modelsConfig untouched.
+ * endpoint only when the chat-only model filter is explicitly disabled. These
+ * IDs come from `/v1/agents`, not `/v1/models`, so appending them while
+ * XCT_FILTER_NON_CHAT_MODELS is active bypasses the media/non-chat filter.
+ * Fail-safe: any problem leaves modelsConfig untouched.
  */
 async function injectAgentModels(modelsConfig) {
+  if (!chatModelFilterDisabled()) {
+    return modelsConfig;
+  }
   try {
     const existing = modelsConfig[AGENTS_ENDPOINT_NAME];
     if (!Array.isArray(existing)) {

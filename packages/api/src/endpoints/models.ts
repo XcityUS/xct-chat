@@ -162,6 +162,7 @@ type LiteLLMModelInfoEntry = {
 function normalizeFilterEnvValue(value: string | undefined): string {
   return String(value || '')
     .trim()
+    .replace(/^['"]|['"]$/g, '')
     .toLowerCase();
 }
 

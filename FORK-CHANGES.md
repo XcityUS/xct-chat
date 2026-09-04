@@ -33,6 +33,7 @@ optional `XCT_ENDPOINT_NAME` (default `XCity AI`).
 ### 2. LiteLLM Hub marketplace/skills source + agent publish-sync
 
 `api/server/services/litellmSource.js` —
+
 - Read-only surfacing of LiteLLM `/v1/agents` and `/v1/xct-skills` in the
   Agent Marketplace / Skills board. Gated behind `LITELLM_AGENTS_ENABLED` /
   `LITELLM_SKILLS_ENABLED`, fail-safe empty lists.
@@ -115,14 +116,17 @@ Env (absent = tool disabled; upstream behavior unchanged): `VIDEO_GEN_API_KEY`
 
 Chat-list hygiene (`XCT_FILTER_NON_CHAT_MODELS`, default-on for XCity AI): the gateway's
 `/v1/models` includes the Seedance/Seedream generation models, so they showed
-up as selectable *chat* models — sending a message 500s at the provider
+up as selectable _chat_ models — sending a message 500s at the provider
 (`ByteplusException`, chat completions on a video model). `packages/api`
 `fetchModels` reads each model's `supported_endpoints` / `mode` from
 `{baseURL}/model/info` (same virtual key) and drops entries that cannot serve
 chat completions before caching. Fails open — if `/model/info` is unreachable
 the list passes through unfiltered. Generic endpoints remain unchanged unless
 they opt in with `XCT_FILTER_NON_CHAT_MODELS=true`; XCity can be disabled with
-`XCT_FILTER_NON_CHAT_MODELS=false` for emergency rollback.
+`XCT_FILTER_NON_CHAT_MODELS=false` for emergency rollback. While the filter is
+active, `/api/models` also skips the legacy append of LiteLLM `/v1/agents` as
+`a2a/*` model ids, because those records bypass `/v1/models` and can include
+media workflow entries.
 
 **Per-user billing** (`handleTools.js`): the image (`image_gen_oai`) and video
 (`video_gen`) tools resolve the signed-in user's own gateway vkey via

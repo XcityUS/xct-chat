@@ -1205,6 +1205,21 @@ describe('fetchModels XCT non-chat model filtering (XCT_FILTER_NON_CHAT_MODELS)'
     expect(models).toEqual(['deepseek-v4-flash', 'legacy-chat-compatible', 'missing-mode']);
   });
 
+  it('accepts quoted true values from hosted env configuration', async () => {
+    process.env.XCT_FILTER_NON_CHAT_MODELS = '"true"';
+    (axios.get as jest.Mock).mockImplementation((url: string) =>
+      url.includes('/model/info') ? Promise.resolve(infoResponse) : Promise.resolve(modelsResponse),
+    );
+
+    const models = await fetchModels({
+      apiKey: 'test-key',
+      baseURL: 'https://api.test/v1',
+      name: 'Other API',
+    });
+
+    expect(models).toEqual(['deepseek-v4-flash', 'legacy-chat-compatible', 'missing-mode']);
+  });
+
   it('enables filtering for a renamed XCity endpoint', async () => {
     process.env.XCT_ENDPOINT_NAME = 'City Chat';
     (axios.get as jest.Mock).mockImplementation((url: string) =>

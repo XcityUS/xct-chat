@@ -1,0 +1,57 @@
+# Dependabot config for xct-chat (LibreChat fork).
+#
+# Dependency surfaces:
+#   1. Node.js monorepo — root package.json + packages/* workspaces
+#   2. Docker — Dockerfile at root
+#   3. GitHub Actions workflows — .github/workflows/
+#
+# Strategy:
+#   - Group minor + patch updates into a single weekly PR per ecosystem
+#   - Weekly Monday 09:00 ET
+#   - Commit prefix: chore(deps)
+
+version: 2
+
+updates:
+  # npm (monorepo root — covers workspaces via Dependabot auto-detection)
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/New_York"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "chore(deps)"
+      prefix-development: "chore(deps-dev)"
+    groups:
+      npm-minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  # Docker
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/New_York"
+    commit-message:
+      prefix: "chore(deps)"
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/New_York"
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      actions-minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]

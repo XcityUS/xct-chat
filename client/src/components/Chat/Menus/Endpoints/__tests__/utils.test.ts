@@ -1,4 +1,9 @@
-import { filterItems, filterChatMappedEndpoints, filterChatModelSpecs } from '../utils';
+import {
+  filterItems,
+  isAgentsInterfaceEnabled,
+  filterChatMappedEndpoints,
+  filterChatModelSpecs,
+} from '../utils';
 import type { TModelSpec } from 'librechat-data-provider';
 import type { Endpoint } from '~/common';
 import type { useLocalize } from '~/hooks';
@@ -93,6 +98,19 @@ describe('model selector utilities', () => {
     ]);
   });
 
+  it('detects when the agent interface is explicitly disabled', () => {
+    expect(isAgentsInterfaceEnabled({ agents: false })).toBe(false);
+    expect(isAgentsInterfaceEnabled({ agents: { use: false } })).toBe(false);
+    expect(isAgentsInterfaceEnabled({ agents: { create: true } })).toBe(true);
+    expect(isAgentsInterfaceEnabled({ agents: true })).toBe(true);
+  });
+
+  it('hides the Agents section when the agent interface is disabled', () => {
+    expect(
+      filterChatMappedEndpoints([agentsEndpointWithModels], 'agents', 'agent-2', false),
+    ).toEqual([]);
+  });
+
   it('injects a deep-linked agent that is outside the accessible list', () => {
     const [result] = filterChatMappedEndpoints(
       [agentsEndpointWithModels],
@@ -121,6 +139,12 @@ describe('model selector utilities', () => {
     expect(filterChatModelSpecs([agentSpec, modelSpec], modelsConfig, 'agents', 'agent-1')).toEqual(
       [agentSpec, modelSpec],
     );
+  });
+
+  it('hides agent model specs when the agent interface is disabled', () => {
+    expect(
+      filterChatModelSpecs([agentSpec, modelSpec], modelsConfig, 'agents', 'agent-1', false),
+    ).toEqual([modelSpec]);
   });
 
   it('hides model specs whose model is unavailable to the user', () => {

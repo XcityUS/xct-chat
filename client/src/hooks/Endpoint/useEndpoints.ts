@@ -18,7 +18,7 @@ import type {
 import type { Endpoint } from '~/common';
 import { useHasAccess, useShowMarketplace } from '~/hooks';
 import { useGetEndpointsQuery } from '~/data-provider';
-import { mapEndpoints, getIconKey } from '~/utils';
+import { mapEndpoints, getIconKey, isAgentsInterfaceEnabled } from '~/utils';
 import { icons } from './Icons';
 
 const defaultInterface = getConfigDefaults().interface;
@@ -46,6 +46,7 @@ export const useEndpoints = ({
     permissionType: PermissionTypes.AGENTS,
     permission: Permissions.USE,
   });
+  const agentsInterfaceEnabled = startupConfig != null && isAgentsInterfaceEnabled(interfaceConfig);
   const showAgentMarketplace = useShowMarketplace();
 
   const assistants: Assistant[] = useMemo(
@@ -64,7 +65,7 @@ export const useEndpoints = ({
     }
     const result: EModelEndpoint[] = [];
     for (let i = 0; i < endpoints.length; i++) {
-      if (endpoints[i] === EModelEndpoint.agents && !hasAgentAccess) {
+      if (endpoints[i] === EModelEndpoint.agents && (!hasAgentAccess || !agentsInterfaceEnabled)) {
         continue;
       }
       if (includedEndpoints.size > 0 && !includedEndpoints.has(endpoints[i])) {
@@ -74,7 +75,13 @@ export const useEndpoints = ({
     }
 
     return result;
-  }, [endpoints, hasAgentAccess, includedEndpoints, interfaceConfig.modelSelect]);
+  }, [
+    endpoints,
+    hasAgentAccess,
+    includedEndpoints,
+    interfaceConfig.modelSelect,
+    agentsInterfaceEnabled,
+  ]);
 
   const endpointRequiresUserKey = useCallback(
     (ep: string) => {
@@ -90,7 +97,9 @@ export const useEndpoints = ({
       const Icon = icons[iconKey];
       const endpointIconURL = getEndpointField(endpointsConfig, ep, 'iconURL');
       const hasModels =
-        (ep === EModelEndpoint.agents && ((agents?.length ?? 0) > 0 || showAgentMarketplace)) ||
+        (ep === EModelEndpoint.agents &&
+          agentsInterfaceEnabled &&
+          ((agents?.length ?? 0) > 0 || showAgentMarketplace)) ||
         (ep === EModelEndpoint.assistants && assistants?.length > 0) ||
         (ep !== EModelEndpoint.assistants &&
           ep !== EModelEndpoint.agents &&
@@ -115,7 +124,7 @@ export const useEndpoints = ({
           : null,
       };
 
-      if (ep === EModelEndpoint.agents && showAgentMarketplace) {
+      if (ep === EModelEndpoint.agents && agentsInterfaceEnabled && showAgentMarketplace) {
         result.showMarketplace = true;
         result.searchAliases = ['agent marketplace', 'marketplace'];
       }
@@ -194,6 +203,7 @@ export const useEndpoints = ({
     }, []);
   }, [
     agents,
+    agentsInterfaceEnabled,
     assistants,
     azureAssistants,
     endpointsConfig,

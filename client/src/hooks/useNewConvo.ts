@@ -30,6 +30,7 @@ import {
   getDefaultModelSpec,
   getDefaultEndpoint,
   getModelSpecPreset,
+  isAgentsInterfaceEnabled,
   hasModelSelection,
   buildDefaultConvo,
   logger,
@@ -61,6 +62,9 @@ const useNewConvo = (index = 0) => {
     permissionType: PermissionTypes.AGENTS,
     permission: Permissions.USE,
   });
+  const agentsInterfaceEnabled =
+    startupConfig != null && isAgentsInterfaceEnabled(startupConfig.interface);
+  const canUseAgents = hasAgentAccess && agentsInterfaceEnabled;
 
   const modelsQuery = useGetModelsQuery();
   const assistantsListMap = useAssistantListMap();
@@ -120,8 +124,8 @@ const useNewConvo = (index = 0) => {
             endpointsConfig,
           });
 
-          // If the selected endpoint is agents but user doesn't have access, find an alternative
-          // Skip this check for existing agent conversations (they have agent_id set)
+          // If the selected endpoint is agents but the platform disables agents, find an alternative.
+          // Existing agent conversations are preserved only while agents remain enabled.
           // Also check localStorage for new conversations restored after refresh
           const { lastConversationSetup } = getLocalStorageItems();
           const storedAgentId =
@@ -130,11 +134,12 @@ const useNewConvo = (index = 0) => {
             isAgentsEndpoint(defaultEndpoint) &&
             ((conversation.agent_id && !isEphemeralAgentId(conversation.agent_id)) ||
               (storedAgentId && !isEphemeralAgentId(storedAgentId)));
+          const canKeepExistingAgentConvo = canUseAgents && isExistingAgentConvo;
           if (
             defaultEndpoint &&
             isAgentsEndpoint(defaultEndpoint) &&
-            !hasAgentAccess &&
-            !isExistingAgentConvo
+            !canUseAgents &&
+            !canKeepExistingAgentConvo
           ) {
             defaultEndpoint = Object.keys(endpointsConfig ?? {}).find(
               (ep) => !isAgentsEndpoint(ep as EModelEndpoint) && endpointsConfig?.[ep],
@@ -146,8 +151,8 @@ const useNewConvo = (index = 0) => {
             defaultEndpoint = Object.keys(endpointsConfig ?? {}).find((ep) => {
               if (
                 isAgentsEndpoint(ep as EModelEndpoint) &&
-                !hasAgentAccess &&
-                !isExistingAgentConvo
+                !canUseAgents &&
+                !canKeepExistingAgentConvo
               ) {
                 return false;
               }
@@ -276,7 +281,7 @@ const useNewConvo = (index = 0) => {
       defaultPreset,
       assistantsListMap,
       modelsQuery.data,
-      hasAgentAccess,
+      canUseAgents,
       searchParams,
     ],
   );

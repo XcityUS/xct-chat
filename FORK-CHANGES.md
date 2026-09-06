@@ -30,13 +30,15 @@ Env (all required to activate; absent = upstream behavior):
 `XCT_KEY_EXCHANGE_ENABLED=true`, `WALLET_BASE_URL`, `WALLET_SERVICE_TOKEN`,
 optional `XCT_ENDPOINT_NAME` (default `XCity AI`).
 
-### 2. LiteLLM Hub marketplace/skills source + agent publish-sync
+### 2. LiteLLM Hub skills source; agent marketplace code retained but disabled
 
 `api/server/services/litellmSource.js` —
 
-- Read-only surfacing of LiteLLM `/v1/agents` and `/v1/xct-skills` in the
-  Agent Marketplace / Skills board. Gated behind `LITELLM_AGENTS_ENABLED` /
-  `LITELLM_SKILLS_ENABLED`, fail-safe empty lists.
+- Read-only surfacing of LiteLLM `/v1/xct-skills` in the Skills board. The
+  LiteLLM `/v1/agents` marketplace/publish-sync code remains in the fork for
+  upstream compatibility, but xct-chat deployment config disables agent
+  browsing, creation, public sharing, and agent chat selection; keep
+  `LITELLM_AGENTS_ENABLED` / `LITELLM_PUBLISH_ENABLED` unset here.
 - `publishAgent(agent, { req })` (marketplace self-publish): pushes a
   LibreChat-built agent to the tokenhub registry **under the publishing
   user's own vkey** (XCT key exchange), so the registry's `created_by`
@@ -55,7 +57,8 @@ optional `XCT_ENDPOINT_NAME` (default `XCity AI`).
   `/c/new?agent_id=…` deep links resolve for other users), client
   `PublishAgent.tsx` button in the agent-builder footer +
   `usePublishAgentMutation` (data-provider `publishAgent`).
-  `librechat.yaml` `interface.agents.share/public: true`.
+  Not active in the default xct-chat config (`librechat.yaml`
+  `interface.agents.*: false`, `interface.marketplace.use: false`).
   Tests: `litellmSource.spec.js` (user-vkey required, POST vs republish PUT,
   category-led skills, author provider).
 

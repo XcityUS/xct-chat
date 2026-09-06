@@ -20,7 +20,7 @@ import {
 } from '~/data-provider';
 import useAssistantListMap from '~/hooks/Assistants/useAssistantListMap';
 import { useAgentsMapContext } from '~/Providers/AgentsMapContext';
-import { mapEndpoints, getPresetTitle } from '~/utils';
+import { mapEndpoints, getPresetTitle, isAgentsInterfaceEnabled } from '~/utils';
 import { EndpointIcon } from '~/components/Endpoints';
 import useHasAccess from '~/hooks/Roles/useHasAccess';
 import { filterMentionEndpoints } from './mentions';
@@ -83,6 +83,8 @@ export default function useMentions({
     () => startupConfig?.interface ?? defaultInterface,
     [startupConfig?.interface],
   );
+  const agentsInterfaceEnabled = startupConfig != null && isAgentsInterfaceEnabled(interfaceConfig);
+  const canUseAgents = hasAgentAccess && agentsInterfaceEnabled;
   const includedEndpoints = useMemo(
     () => new Set(startupConfig?.modelSpecs?.addedEndpoints ?? []),
     [startupConfig?.modelSpecs?.addedEndpoints],
@@ -93,13 +95,13 @@ export default function useMentions({
         endpoints,
         includedEndpoints,
         includeAssistants,
-        hasAgentAccess,
+        hasAgentAccess: canUseAgents,
       }),
-    [endpoints, includedEndpoints, includeAssistants, hasAgentAccess],
+    [endpoints, includedEndpoints, includeAssistants, canUseAgents],
   );
   const validEndpointSet = useMemo(() => new Set(validEndpoints), [validEndpoints]);
   const agentQueryEnabled =
-    hasAgentAccess &&
+    canUseAgents &&
     interfaceConfig.modelSelect === true &&
     (includedEndpoints.size === 0 || includedEndpoints.has(EModelEndpoint.agents));
   const { data: agentsList = null, isLoading: isLoadingAgents } = useListAgentsQuery(
@@ -153,9 +155,6 @@ export default function useMentions({
 
   const modelSpecs = useMemo(() => {
     const specs = startupConfig?.modelSpecs?.list ?? [];
-    if (!agentsMap) {
-      return specs;
-    }
 
     /**
      * Filter modelSpecs to only include agents the user has access to.
@@ -163,12 +162,18 @@ export default function useMentions({
      */
     return specs.filter((spec) => {
       if (spec.preset?.endpoint === EModelEndpoint.agents && spec.preset?.agent_id) {
+        if (!canUseAgents) {
+          return false;
+        }
+        if (!agentsMap) {
+          return true;
+        }
         return spec.preset.agent_id in agentsMap;
       }
       /** Keep non-agent modelSpecs */
       return true;
     });
-  }, [startupConfig, agentsMap]);
+  }, [canUseAgents, startupConfig, agentsMap]);
 
   const options: MentionOption[] = useMemo(() => {
     const modelOptions = validEndpoints.flatMap((endpoint) => {

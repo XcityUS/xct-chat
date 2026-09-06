@@ -11,6 +11,9 @@ import type {
 import type { useLocalize } from '~/hooks';
 import SpecIcon from './components/SpecIcon';
 import { Endpoint, SelectedValues } from '~/common';
+import { isAgentsInterfaceEnabled } from '~/utils/endpoints';
+
+export { isAgentsInterfaceEnabled };
 
 export function filterItems<
   T extends {
@@ -125,15 +128,12 @@ export function filterChatModelSpecs(
   modelsConfig: TModelsConfig | undefined,
   _endpoint: string | null | undefined,
   _agent_id: string | null | undefined,
+  agentsInterfaceEnabled = true,
 ): TModelSpec[] {
   return modelSpecs.filter((spec) => {
     const specEndpoint = spec.preset?.endpoint;
     if (isAgentsEndpoint(specEndpoint)) {
-      // Agent specs reaching this point are already permission-filtered
-      // upstream (ModelSelectorContext keeps only agent_ids present in
-      // agentsMap) — keep them selectable at all times so users can start
-      // an agent conversation straight from the picker.
-      return true;
+      return agentsInterfaceEnabled;
     }
 
     if (isAssistantsEndpoint(specEndpoint)) {
@@ -154,12 +154,17 @@ export function filterChatMappedEndpoints(
   mappedEndpoints: Endpoint[],
   endpoint: string | null | undefined,
   agent_id: string | null | undefined,
+  agentsInterfaceEnabled = true,
 ): Endpoint[] {
   const hasSelectedAgent = isAgentsEndpoint(endpoint) && !!agent_id;
 
   return mappedEndpoints.flatMap((mappedEndpoint) => {
     if (!isAgentsEndpoint(mappedEndpoint.value)) {
       return [mappedEndpoint];
+    }
+
+    if (!agentsInterfaceEnabled) {
+      return [];
     }
 
     // The Agents section stays in the picker with the user's accessible

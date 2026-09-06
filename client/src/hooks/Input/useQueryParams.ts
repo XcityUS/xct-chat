@@ -2,7 +2,12 @@ import { useEffect, useCallback, useRef } from 'react';
 import { useRecoilValue } from 'recoil';
 import { useSearchParams } from 'react-router-dom';
 import { QueryClient, useQueryClient } from '@tanstack/react-query';
-import { QueryKeys, EModelEndpoint, PermissionBits } from 'librechat-data-provider';
+import {
+  QueryKeys,
+  EModelEndpoint,
+  PermissionBits,
+  isAgentsEndpoint,
+} from 'librechat-data-provider';
 import type {
   AgentListResponse,
   TEndpointsConfig,
@@ -16,10 +21,11 @@ import {
   processValidSettings,
   getModelSpecIconURL,
   getConvoSwitchLogic,
+  isAgentsInterfaceEnabled,
   logger,
 } from '~/utils';
 import { useAuthContext, useAgentsMap, useDefaultConvo, useSubmitMessage } from '~/hooks';
-import { startupConfigKey, useGetAgentByIdQuery } from '~/data-provider';
+import { startupConfigKey, useGetAgentByIdQuery, useGetStartupConfig } from '~/data-provider';
 import { useChatContext, useChatFormContext } from '~/Providers';
 import store from '~/store';
 
@@ -38,6 +44,19 @@ const injectAgentIntoAgentsMap = (queryClient: QueryClient, agent: any) => {
     queryClient.setQueryData(editCacheKey, updatedCache);
     logger.log('agent', 'Injected URL agent into cache:', agent);
   }
+};
+
+const sanitizeDisabledAgentSettings = (settings: TPreset): TPreset => {
+  const settingsWithoutAgent = { ...settings };
+  delete settingsWithoutAgent.agent_id;
+
+  if (!isAgentsEndpoint(settingsWithoutAgent.endpoint)) {
+    return settingsWithoutAgent;
+  }
+
+  return Object.fromEntries(
+    Object.entries(settingsWithoutAgent).filter(([key]) => key !== 'endpoint' && key !== 'model'),
+  ) as TPreset;
 };
 
 /**
@@ -70,9 +89,14 @@ export default function useQueryParams({
 
   const queryClient = useQueryClient();
   const { conversation, newConversation } = useChatContext();
+  const { data: loadedStartupConfig } = useGetStartupConfig();
+  const agentsInterfaceEnabled =
+    loadedStartupConfig != null && isAgentsInterfaceEnabled(loadedStartupConfig.interface);
 
-  const urlAgentId = searchParams.get('agent_id') || '';
-  const { data: urlAgent } = useGetAgentByIdQuery(urlAgentId);
+  const urlAgentId = agentsInterfaceEnabled ? searchParams.get('agent_id') || '' : '';
+  const { data: urlAgent } = useGetAgentByIdQuery(urlAgentId, {
+    enabled: agentsInterfaceEnabled && !!urlAgentId,
+  });
 
   const getPreservedSearchParams = useCallback(() => {
     const preservedParams = new URLSearchParams();
@@ -281,7 +305,18 @@ export default function useQueryParams({
         return;
       }
 
-      const { decodedPrompt, validSettings, shouldAutoSubmit } = processQueryParams();
+      const {
+        decodedPrompt,
+        validSettings: rawValidSettings,
+        shouldAutoSubmit,
+      } = processQueryParams();
+      let validSettings = rawValidSettings;
+      if (
+        !isAgentsInterfaceEnabled(startupConfig.interface) &&
+        (validSettings.agent_id || isAgentsEndpoint(validSettings.endpoint))
+      ) {
+        validSettings = sanitizeDisabledAgentSettings(validSettings);
+      }
       const hasSettings = Object.keys(validSettings).length > 0;
 
       const autoSubmitAllowed = startupConfig.interface?.autoSubmitFromUrl !== false;

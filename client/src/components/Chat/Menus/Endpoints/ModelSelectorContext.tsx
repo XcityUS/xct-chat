@@ -14,7 +14,12 @@ import { useAgentsMapContext, useAssistantsMapContext, useLiveAnnouncer } from '
 import { useGetEndpointsQuery, useListAgentsQuery } from '~/data-provider';
 import { useModelSelectorChatContext } from './ModelSelectorChatContext';
 import useSelectMention from '~/hooks/Input/useSelectMention';
-import { filterChatMappedEndpoints, filterChatModelSpecs, filterItems } from './utils';
+import {
+  filterItems,
+  isAgentsInterfaceEnabled,
+  filterChatMappedEndpoints,
+  filterChatModelSpecs,
+} from './utils';
 
 type ModelSelectorContextType = {
   // State
@@ -62,11 +67,10 @@ export function ModelSelectorProvider({ children, startupConfig }: ModelSelector
     useModelSelectorChatContext();
   const localize = useLocalize();
   const { announcePolite } = useLiveAnnouncer();
+  const agentsInterfaceEnabled =
+    startupConfig != null && isAgentsInterfaceEnabled(startupConfig.interface);
   const modelSpecs = useMemo(() => {
     const specs = startupConfig?.modelSpecs?.list ?? [];
-    if (!agentsMap) {
-      return specs;
-    }
 
     /**
      * Filter modelSpecs to only include agents the user has access to.
@@ -74,17 +78,24 @@ export function ModelSelectorProvider({ children, startupConfig }: ModelSelector
      */
     return specs.filter((spec) => {
       if (spec.preset?.endpoint === EModelEndpoint.agents && spec.preset?.agent_id) {
+        if (!agentsInterfaceEnabled) {
+          return false;
+        }
+        if (!agentsMap) {
+          return true;
+        }
         return spec.preset.agent_id in agentsMap;
       }
       /** Keep non-agent modelSpecs */
       return true;
     });
-  }, [startupConfig, agentsMap]);
+  }, [agentsInterfaceEnabled, startupConfig, agentsMap]);
 
   const permissionLevel = useAgentDefaultPermissionLevel();
   const { data: agents = null } = useListAgentsQuery(
     { requiredPermission: permissionLevel },
     {
+      enabled: agentsInterfaceEnabled,
       select: (data) => data?.data,
     },
   );
@@ -96,12 +107,13 @@ export function ModelSelectorProvider({ children, startupConfig }: ModelSelector
     endpointsConfig,
   });
   const visibleModelSpecs = useMemo(
-    () => filterChatModelSpecs(modelSpecs, modelsConfig, endpoint, agent_id),
-    [agent_id, endpoint, modelSpecs, modelsConfig],
+    () =>
+      filterChatModelSpecs(modelSpecs, modelsConfig, endpoint, agent_id, agentsInterfaceEnabled),
+    [agent_id, agentsInterfaceEnabled, endpoint, modelSpecs, modelsConfig],
   );
   const visibleMappedEndpoints = useMemo(
-    () => filterChatMappedEndpoints(mappedEndpoints, endpoint, agent_id),
-    [agent_id, endpoint, mappedEndpoints],
+    () => filterChatMappedEndpoints(mappedEndpoints, endpoint, agent_id, agentsInterfaceEnabled),
+    [agent_id, agentsInterfaceEnabled, endpoint, mappedEndpoints],
   );
 
   const getModelDisplayName = useCallback(

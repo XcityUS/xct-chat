@@ -11,17 +11,8 @@ version: 1.3.12
 #              The fetch drops LiteLLM modes that cannot serve chat completions
 #              by default for this endpoint, so media models do not appear in
 #              chat; studio.xcity.ai remains the product exit for media.       [done]
-#   - Image  : built-in "OpenAI Image Tools" agent tool, configured by the
-#              IMAGE_GEN_OAI_* env vars (see railway.env.template) which point
-#              at https://tokenhub.xcity.one/v1. Enabled via the `tools`
-#              agent capability below — nothing to add in this file.          [done]
-#   - Video  : native fork tool "video_gen" (FORK-CHANGES.md §3), configured by
-#              the VIDEO_GEN_* env vars pointing at the LiteLLM gateway video
-#              API. Auto-enabled for agents when VIDEO_GEN_API_KEY is set;
-#              enabled via the `tools` agent capability below.                [done]
-#   - Audio  : no native LibreChat tool; expose the fal gateway /generate/audio
-#              as an Agent Action and allow its host under
-#              `actions.allowedDomains` once the gateway URL is known.        [pending: needs gateway deploy]
+#   - Media  : not exposed from xct-chat. Send image/video/audio workflows to
+#              studio.xcity.ai instead.
 
 endpoints:
   # ---- Chat (text-capable LiteLLM models, auto-discovered) ----
@@ -42,7 +33,7 @@ endpoints:
   # Capabilities are the verified AgentCapabilities enum values only.
   agents:
     recursionLimit: 25
-    disableBuilder: false
+    disableBuilder: true
     maxCitations: 30
     maxCitationsPerFile: 7
     minRelevanceScore: 0.45
@@ -60,31 +51,21 @@ endpoints:
       - ocr
       - deferred_tools
 
-# Agent-first positioning: Agents are the primary consumption surface
-# (xct-home deep-links land on /c/new?agent_id=…); direct model chat via the
-# 'XCity AI' endpoint stays available (/c/new?endpoint=XCity%20AI&model=…)
-# but is the secondary path. Both run on the user's own virtual key when the
-# XCT key exchange is enabled (FORK-CHANGES.md §1) — same budget pool.
+# xct-chat is the text-chat surface. Agents and media workflows are routed to
+# other XCity products, so the local UI must not expose agent browsing,
+# creation, public sharing, or agent chat selection.
 interface:
   agents:
-    use: true
-    create: true
-    # Sharing enabled so marketplace-published agents (public AGENT_VIEWER
-    # grant on publish) resolve for other users via /c/new?agent_id=… deep
-    # links from xct-home.
-    share: true
-    public: true
-  # In-chat Agent Marketplace. Also flips the chat picker's agent list to
-  # EDIT permission (the user's OWN agents) instead of VIEW — without this,
-  # every publicly published agent (250+) floods the model selector, which
-  # is what originally forced hiding the Agents section (PR #39).
+    use: false
+    create: false
+    share: false
+    public: false
   marketplace:
-    use: true
+    use: false
   sharedLinks:
     create: true
     share: true
     public: true
-
 # ---------------------------------------------------------------------------
 # MCP servers
 # ---------------------------------------------------------------------------

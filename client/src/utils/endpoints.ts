@@ -174,6 +174,16 @@ export function hasModelSelection(selection?: Partial<StoredModelSelection> | nu
   );
 }
 
+export function isAgentsInterfaceEnabled(
+  interfaceConfig?: Partial<t.TInterfaceConfig> | null,
+): boolean {
+  const agentsConfig = interfaceConfig?.agents;
+  if (typeof agentsConfig === 'boolean') {
+    return agentsConfig;
+  }
+  return agentsConfig?.use !== false;
+}
+
 /**
  * Whether the selector offers any ephemeral endpoint → model options.
  * False when the endpoints menu is hidden (`modelSelect` disabled) or only

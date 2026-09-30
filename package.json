@@ -152,7 +152,7 @@
     "typescript-eslint": "^8.60.1"
   },
   "overrides": {
-    "@xmldom/xmldom": "^0.8.13",
+    "@xmldom/xmldom": "^0.8.15",
     "elliptic": "^6.6.1",
     "form-data": "^4.0.6",
     "langsmith": "^0.6.0",
